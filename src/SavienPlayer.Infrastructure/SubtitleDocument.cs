@@ -96,7 +96,11 @@ public sealed class SubtitleDocument
         {
             text = WebUtility.HtmlDecode(Regex.Replace(text, "<[^>]*>", "", RegexOptions.None, RegexTimeout));
         }
-        if (!string.IsNullOrWhiteSpace(text)) cues.Add(new Cue(from, to, text));
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            if (cues.Count >= 100000) throw new InvalidDataException("Subtitle exceeds 100,000 cues.");
+            cues.Add(new Cue(from, to, text.Length > 4096 ? text[..4096] : text));
+        }
     }
 
     private static bool TryTime(string text, out long milliseconds)
@@ -128,9 +132,10 @@ public sealed class SubtitleDocument
             else high = middle;
         }
         var active = new List<string>();
-        for (var i = low - 1; i >= 0 && _maximumEnd[i] > time; i--)
+        for (var i = low - 1; i >= 0 && _maximumEnd[i] > time && active.Count < 16; i--)
             if (_cues[i].End > time) active.Add(_cues[i].Text);
         active.Reverse();
-        return string.Join("\n", active);
+        var text = string.Join("\n", active);
+        return text.Length > 4096 ? text[..4096] : text;
     }
 }

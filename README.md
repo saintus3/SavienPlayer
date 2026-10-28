@@ -211,6 +211,8 @@ Use these repeatable manual checks:
   `\N`/`\n` line breaks and `\h` spaces are handled. Bad cues are skipped;
   unsupported/empty/no-valid-cue files report a load error without replacing the
   current subtitle. Files over 8 MiB are rejected and regex work is time-limited.
+  Custom rendering is limited to 100,000 cues, 16 simultaneous cues, and 4,096
+  displayed characters to bound the cost of malformed or unusually large input.
 - **−100 / +100** adjust sync by 100 ms. **Ctrl+[ / Ctrl+]** do the same except
   when editing a text box. The existing millisecond field + **적용** supports
   precise values, clamped to ±600,000 ms. Positive values display subtitles later.
