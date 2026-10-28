@@ -33,16 +33,300 @@ Prerequisites:
 
 Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
 
-## Subtitle v1 Usage
+## Subtitle Usage
 1. Open a video file
 2. Click `자막 열기` and select `.srt` (or `.ass/.ssa/.vtt`)
 3. Enter sync offset in milliseconds and click `적용`
    - Positive: subtitle later
    - Negative: subtitle earlier
 4. Click `자막 해제` to clear subtitle state
+5. Same-name `.srt`/`.ass` sidecars are loaded automatically. Use the style controls
+   for instant custom rendering, or **원본 스타일 (VLC)** for native ASS effects.
 
 ## Project Structure
 - `src/SavienPlayer.App` - WPF UI layer
 - `src/SavienPlayer.Core` - domain models and interfaces
 - `src/SavienPlayer.Infrastructure` - VLC-based media player service
 - `tests/SavienPlayer.Tests` - test project placeholder
+
+## Playback stability verification (#1)
+
+The test project is currently a placeholder (no test runner). Validate on Windows
+with the installed VLC runtime and both a 1080p and a 4K file, including media
+longer than two hours. Use the same files/VLC version before and after the change.
+
+1. Play, then seek at least 10 times, alternating forward/backward between 5%,
+   80%, 20%, 95%, and 50%. Include rapid repeated seeks and a seek near the end.
+   Check lip sync or a visible/audible clap after each seek settles.
+2. Pause, seek repeatedly, and wait five seconds: playback must remain paused.
+   Resume and check that sound and picture continue from the new position.
+3. Repeat pause/resume 30 times, including rapid double clicks on Pause and Play,
+   and pause immediately after starting or seeking. Pause must never toggle back
+   to playing; elapsed time must not accumulate while paused.
+4. Stop during a seek, play again, and open another file during playback.
+   Confirm the old position/state does not reappear and the UI remains responsive.
+   Repeat with a high-bitrate 4K file while dragging the seek bar.
+
+Capture `System.Diagnostics.Trace` output (Visual Studio Output while debugging,
+or a host-configured trace listener). State transitions include playback intent.
+Seek observations include the target/observed timestamp, signed error, elapsed
+wall time, and VLC's cumulative displayed/lost picture counts. Compare lost-picture
+deltas over equivalent playback intervals, not across different media sessions.
+`confirmed=True` means a timestamp was observed within one second of the target;
+it is **not** a measurement or guarantee of A/V drift. `confirmed=False` after
+five seconds of observed playback warrants investigation. Paused seeks may not
+emit a timestamp until resume. Unseekable/unknown-length media and non-finite
+seek inputs are ignored rather than altering the current playback clock.
+
+VLC owns audio/video clock and decoder-buffer resynchronization during a time
+seek. The service preserves play/pause intent rather than forcing a restart.
+Visual A/V validation on real hardware is still required; timestamp logs alone
+cannot establish lip-sync accuracy or guarantee frame delivery under overload.
+
+## Playback failures and recovery (#2)
+
+Playback failures show an actionable Korean message for missing files, read
+permissions, I/O errors, unavailable codecs, damaged/undecodable data, or an
+unknown cause. Failed playback is stopped, the timeline/subtitle UI is reset, and
+the application stays open. After fixing the problem, click **재생** to reopen
+the last requested file, or **열기** to choose another file. Opening a new file
+invalidates pending errors from the previous session.
+
+The app writes diagnostics to
+`%LOCALAPPDATA%\SavienPlayer\Logs\playback-YYYYMMDD-PID.log`. The error dialog
+includes the path. Logs contain the operation, error category, local media path,
+playback state, managed HRESULT/stack trace when available, and up to 16 recent
+VLC warnings/errors (each limited to 2,048 characters). VLC's log events are
+delivered asynchronously, so these engine-wide records are explicitly marked
+unattributed and are not used to classify the current file. Late log events are
+also written individually. Logs are local only and
+can contain private file paths; review/redact them before sharing and delete old
+logs as needed. If logging cannot be initialized, a debugger trace is still
+attempted. A later disk-write failure disables the file listener rather than
+crashing playback.
+
+VLC's `EncounteredError` event does not provide a structured error code.
+Codec/decoding classifications therefore require explicit evidence from a
+session-versioned VLC error-dialog callback; ambiguous failures remain
+**Unknown** rather than guessing from file
+extensions. An empty file is classified as damaged data before invoking VLC.
+The player does not claim that every malformed file or partially unsupported
+audio/video track will produce a fatal VLC error.
+
+### Failure/recovery checks (Windows + VLC)
+
+The existing test project has no runner; these are manual scenarios, not
+automated test results. Run as a normal user (not administrator):
+
+| Case | Setup | Expected result |
+| --- | --- | --- |
+| Missing file | Open a valid file, stop, delete/rename it, then click Play | Missing-file message; no crash |
+| Read permission | Remove the current user's read access to a test copy, then select it | Permission-specific message, not missing-file |
+| Damaged data | Open an empty `.mp4`, then a truncated copy of a known-good video | Empty file reports damaged data; native failure on truncated media includes VLC diagnostics, possibly Unknown if inconclusive |
+| Unsupported codec | Use a known sample requiring a decoder absent from the installed VLC build | When VLC reports an explicit missing-decoder failure, codec-specific advice; no inference from the extension alone |
+| I/O failure | Keep a test file exclusively locked by another process, then open it | I/O-specific message and managed error code/stack |
+| Native/runtime setup | Launch without a compatible 64-bit VLC runtime | Startup guidance and diagnostic log, followed by clean exit |
+
+After each playback failure, restore access/the file and click Play, then open
+a different valid file. Confirm audio/video, seek, pause/resume, and subtitles
+work again, and the previous error dialog does not reappear. Check one failure
+record per attempt, the matching category/file, and either a managed exception
+or native diagnostic context. Also deny log-folder writes and verify playback
+errors still show without a secondary crash. Re-run the #1 stress scenarios to
+check the nonblocking native-callback/UI boundary.
+
+## Settings and resume playback (#3)
+
+Preferences are stored locally in
+`%LOCALAPPDATA%\SavienPlayer\settings.json` (JSON schema version `1`).
+They include volume (0–100), requested playback speed (0.25–4×), normal window
+size, maximized/fullscreen state, and the last opened file and position in
+milliseconds. The speed slider changes the requested rate; VLC may reject or
+not honor a rate for some media/protocols, which is recorded in the trace.
+Fullscreen exit restores the previous windowed maximized/normal state.
+Window dimensions are fitted to the primary work area on startup; position
+and monitor placement are not persisted.
+
+- Volume/speed changes, seeks, Stop, fullscreen toggles, and file selection
+  trigger a save. Window size and playback position are checkpointed every five
+  seconds and on normal window close, before the player is disposed.
+- Writes use a unique temporary file in the settings folder, flush it, and
+  replace the settings file. Failed reads/writes are logged without preventing
+  playback. An unexpected process termination may lose changes since the last
+  checkpoint; simultaneous app instances use last-writer-wins.
+- Missing, invalid, oversized (over 1 MiB), or unreadable settings fall back to
+  defaults. Known-version numeric values are clamped to supported ranges.
+  Version `1` has no migrations yet; missing properties use defaults.
+  Unknown versions are not loaded **or overwritten** during that session.
+- At startup the last accessible file automatically starts playback. Its saved
+  timestamp is applied once VLC has actually started and reports a seekable
+  stream with a known duration. Stop, another file, or an explicit seek cancels
+  a pending resume. A position within the last second or beyond the new duration
+  starts at zero; a stopped/finished file also restarts at zero.
+  If readiness is still unavailable after five seconds from native playback start,
+  the next time notification cancels resume and tracks actual playback instead.
+- If the saved file was moved/deleted or cannot be found, a Korean notice is
+  shown and the player remains ready for **열기**. Other playback failures use
+  the #2 error/retry flow. Settings contain local media paths and stay on this
+  machine; review them before sharing.
+
+### Settings verification (Windows + VLC)
+
+There is no executable test framework in the existing placeholder test project.
+Use these repeatable manual checks:
+
+1. Change volume and speed (for example 35 and 1.5×), resize the normal window,
+   enable fullscreen, and play/seek into a known file. Close normally and relaunch.
+   Verify all preferences, fullscreen, and the saved playback point are restored.
+   Exit fullscreen and confirm the saved windowed dimensions/state return.
+2. Repeat while paused after seeking, while maximized, and after leaving playback
+   running for more than five seconds. Verify long-file resume uses milliseconds
+   rather than rounded percentage. Stop or finish playback and restart: it should
+   begin at zero, not immediately end.
+3. Close immediately after opening a saved file, before VLC is ready, and
+   relaunch: the pending resume target must not be overwritten with startup zero.
+   During startup resume, Stop/open another file and verify no delayed seek leaks
+   into the new session. Check the `Playback resume: target=...ms` trace.
+4. Rename/delete the last file and relaunch. Dismiss the notice and open a valid
+   file. Restore a permission-denied/damaged file and verify the #2 recovery UI.
+5. Back up `settings.json`, then test invalid JSON, `null`, an oversized file,
+   negative position, invalid dimensions, and out-of-range volume/speed.
+   The app must start safely with defaults or normalized values. Test a future
+   `Version` value and confirm the original file is unchanged after closing.
+6. Deny writes to the settings directory and repeat preference changes/close.
+   Playback should continue and diagnostics should explain the save failure.
+   Restore the backup and permissions afterwards; repeat the #1 seek/pause stress
+   checks with non-default playback speed.
+
+## Subtitle enhancements (#4)
+
+- Opening/retrying/resuming `movie.mkv` searches its directory for exactly
+  `movie.srt` or `movie.ass` (case-insensitive basename/extension). SRT wins when
+  both exist; ties use ordinal filename order. No language-suffix guessing or
+  recursive scans. A missing/bad sidecar does not fail video playback.
+- Manual loading supports UTF-8 and BOM-marked Unicode SRT, ASS/SSA, and VTT.
+  Custom rendering uses timed plain-text cues, overlapping cues, multiline text,
+  SRT/VTT tag removal/entity decoding, and ASS `Dialogue` records using the
+  `[Events] Format` columns (Text last). ASS override blocks are stripped and
+  `\N`/`\n` line breaks and `\h` spaces are handled. Bad cues are skipped;
+  unsupported/empty/no-valid-cue files report a load error without replacing the
+  current subtitle. Files over 8 MiB are rejected and regex work is time-limited.
+  Custom rendering is limited to 100,000 cues, 16 simultaneous cues, and 4,096
+  displayed characters to bound the cost of malformed or unusually large input.
+- **−100 / +100** adjust sync by 100 ms. **Ctrl+[ / Ctrl+]** do the same except
+  when editing a text box. The existing millisecond field + **적용** supports
+  precise values, clamped to ±600,000 ms. Positive values display subtitles later.
+  Changes refresh immediately, including when paused or after seeking.
+- Font family, size (12–96 device-independent pixels), black outline (0–6), and
+  top/center/bottom placement apply immediately without restarting playback.
+  External subtitles use `VideoView.Content`'s foreground overlay, not a sibling
+  WPF element hidden behind the native video HWND. It follows the playback clock
+  on a 50 ms UI timer and does not change A/V synchronization. Placement is relative
+  to the video view, including letterbox space.
+- Custom styling intentionally overrides authored ASS styles, animation, karaoke,
+  drawings, and positioning. Enable **원본 스타일 (VLC)** to retain native ASS
+  rendering/embedded fonts and legacy VLC subtitle effects; custom style controls
+  are disabled in that mode, but sync remains adjustable. Switching native mode
+  reattaches the selected external file; repeated switches may add VLC track
+  entries until the media is reopened. If native loading fails at startup, the
+  player falls back to the custom renderer and updates the checkbox.
+- External custom subtitles disable native subtitle tracks to avoid duplicates.
+  **자막 해제** hides subtitles (including native tracks); the saved sync/style
+  preferences remain intact. Auto-discovery runs again when a file is reopened.
+  Embedded-only subtitles still use VLC and are not restyled by the custom controls.
+- Offset, font, size, outline, placement and original-style preference are additive
+  schema-v1 settings saved with the existing change/periodic/close checkpoints.
+  New files and playback failures no longer erase these preferences. Missing
+  installed fonts fall back to an installed system font.
+
+### Subtitle verification
+
+The test project still has no executable runner. On Windows/VLC:
+
+1. Put `sample.srt` next to `sample.mp4`, open/restart/resume, and verify automatic
+   loading and the displayed filename. Repeat with ASS, uppercase extensions,
+   both formats (SRT wins), neither, and malformed preferred sidecars.
+2. Load an SRT with overlapping/multiline cues and seek forward/back repeatedly.
+   Pause on a cue and test both buttons, exact millisecond input, and shortcuts.
+   Check positive delay against a clap/line boundary; check no shortcut activation
+   while typing in the offset field. Stop/end/failure/clear should hide text.
+3. While paused, change each custom style control and verify immediate rendering.
+   Resize/fullscreen/restore and check that text remains visible above the video,
+   wraps, and stays within the view. Repeat at high DPI and with long lines.
+4. Open a styled/karaoke ASS and switch **원본 스타일 (VLC)** on/off. Verify native
+   effects vs custom text, sync in both modes, no duplicate visible captions,
+   and that a failed manual load leaves the prior subtitle usable.
+5. Close/restart after changing sync/font/size/outline/position/native preference.
+   Verify all restore, then open a second video: preferences should carry over
+   but its sidecar must replace the old cues. Test clear, pause/resume, Stop/Play,
+   errors/retry, and the #1 stress scenarios in both rendering modes.
+
+## Playback keyboard shortcuts (#5)
+
+The same map applies in normal and fullscreen mode, including when a button,
+slider, video input surface, or subtitle foreground window has focus:
+
+| Key | Action |
+| --- | --- |
+| Space | Play / pause (or retry after a playback error) |
+| Left / Right | Seek backward / forward 5 seconds |
+| Up / Down | Increase / decrease volume by 5 |
+| M | Toggle mute without changing the saved volume level |
+| F | Toggle fullscreen, preserving the previous windowed state |
+| Ctrl+[ / Ctrl+] | Subtitle earlier / later by 100 ms |
+
+Up increases volume by 5; Down decreases it by 5, clamped to 0–100. The
+**음소거 (M)** checkbox displays mute state and can also toggle it with the mouse.
+Volume adjustments unmute. Mute is session-only; the previous volume preference
+continues to be saved and restored.
+
+Playback keys use a single UI-thread message filter for the main window and
+`VideoView.Content` foreground window, including native child video HWNDs.
+Clicking the video focuses a near-transparent WPF input surface (1/255 black
+alpha, so layered-window hit testing does not pass clicks through) in that
+foreground window. This keeps interactive key input on the UI thread rather than VLC's
+separate video thread, where WPF's message filter cannot intercept it. The input
+surface intentionally handles video-area mouse hit testing; native DVD/menu mouse
+interaction is not supported through this surface.
+Native VLC keyboard handling is disabled so a key cannot execute both VLC and
+application actions. This is not a system-wide hotkey hook: inactive app windows,
+file/error dialogs, and unrelated windows are excluded. The filter is removed
+when the main window closes.
+
+Text/password editors, combo boxes, and other selection controls keep their
+normal keyboard behavior (including subtitle offset editing and font selection).
+Elsewhere, playback keys take priority over a focused button or slider's default
+Space/arrow actions; use Tab and Enter or the mouse to operate those controls.
+Ctrl/Alt/Shift/Windows-modified playback keys are left alone, except the existing
+Ctrl+bracket subtitle shortcuts. Space/M/F ignore auto-repeat until released;
+arrows and Ctrl+brackets allow repeats. Seek/mute preserve paused playback.
+Unseekable/unknown-duration or stopped media ignore relative seeks. Rapid seeks
+accumulate from the pending target rather than stale progress-bar percentages,
+and are clamped to the media duration without changing play/pause intent.
+
+### Keyboard verification (Windows + VLC)
+
+The existing test project has no executable test runner. For each case below,
+repeat in normal and fullscreen modes, with custom subtitles and original VLC
+subtitles, and with/without an external subtitle:
+
+1. Focus a playback button, each slider, the native video area, and the subtitle
+   overlay. Check every shortcut once, including Space while buffering/starting.
+   One press must cause only one action. Hold Space/M/F: only one toggle; release
+   and press again: another toggle. Hold arrows: repeated steps.
+2. Play, then pause and press Left/Right repeatedly. Verify 5-second steps,
+   accumulation during rapid requests, clamping near zero/end, and paused state
+   preservation. Stop and seek: nothing should happen; Space should start again.
+3. Set volume to 35, press M twice, and confirm the slider remains 35 and sound
+   returns. Mute then press Up/Down (also at bounds); verify unmuting and 5-point
+   changes. Open another file while muted: it should remain muted for the session.
+4. Type/edit in the subtitle offset box, navigate font/position combo boxes and
+   their popups, and use Ctrl+A/C/V, Alt+F4 and modified arrow keys. No unintended
+   playback/volume/fullscreen action should occur. Verify Ctrl+brackets still work
+   outside editors/selection controls.
+5. Open a file dialog or playback error dialog and press the playback keys.
+   They must operate only the dialog, not the player behind it. Switch to another
+   app and repeat: the player must not react. Return, then verify shortcuts work.
+6. Repeat fullscreen toggles, subtitle sync changes and the #1 seek/pause stress
+   cases using keys; close/reopen the app and check saved volume, fullscreen and
+   last-position behavior. Check that closing removes the message filter.
