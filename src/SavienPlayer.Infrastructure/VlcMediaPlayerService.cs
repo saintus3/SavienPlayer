@@ -18,13 +18,18 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     private PlaybackState _requestedState = PlaybackState.None;
     private long _seekTarget = -1;
     private long _seekStarted;
+    private string? _mediaPath;
+    private readonly object _diagnosticGate = new();
+    private readonly Queue<string> _nativeErrors = new();
 
     public event EventHandler<double>? PositionChanged;
     public event EventHandler<TimeSpan>? TimeChanged;
     public event EventHandler<PlaybackState>? PlaybackStateChanged;
+    public event EventHandler<PlaybackError>? PlaybackFailed;
 
     public bool IsLoaded { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.None;
+    public PlaybackError? LastError { get; private set; }
 
     public MediaPlayer NativePlayer => _mediaPlayer;
 
@@ -38,6 +43,18 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC();
         _mediaPlayer = new MediaPlayer(_libVlc);
+        _libVlc.Log += OnVlcLog;
+        _libVlc.SetDialogHandlers(
+            (title, text) =>
+            {
+                var diagnostic = $"{title}: {text}";
+                QueueCallback(() => FailPlayback("VLC error dialog", nativeDiagnostic: diagnostic));
+                return Task.CompletedTask;
+            },
+            (dialog, _, _, _, _, _) => { dialog.Dismiss(); return Task.CompletedTask; },
+            (dialog, _, _, _, _, _, _, _) => { dialog.Dismiss(); return Task.CompletedTask; },
+            (dialog, _, _, _, _, _, _) => { dialog.Dismiss(); return Task.CompletedTask; },
+            (_, _, _) => Task.CompletedTask);
 
         _mediaPlayer.TimeChanged += (_, e) =>
         {
@@ -74,19 +91,33 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             });
         };
         _mediaPlayer.EndReached += (_, _) => QueueCallback(() => Complete(PlaybackState.Ended));
-        _mediaPlayer.EncounteredError += (_, _) => QueueCallback(() => Complete(PlaybackState.Error));
+        _mediaPlayer.EncounteredError += (_, _) => QueueCallback(() => FailPlayback("VLC.EncounteredError"));
     }
 
     public void Open(string mediaPath)
     {
-        lock (_commandGate)
+        ExecuteCommand("Open", () =>
         {
             if (_disposed) return;
+            _mediaPath = mediaPath;
+            LastError = null;
             _mediaPlayer.Stop();
             Interlocked.Increment(ref _mediaVersion);
             ResetTimeline();
+            IsLoaded = false;
+            lock (_diagnosticGate) _nativeErrors.Clear();
+            _mediaPlayer.Media = null;
             _currentMedia?.Dispose();
-            _currentMedia = new Media(_libVlc, new Uri(mediaPath));
+            _currentMedia = null;
+            _mediaPath = Path.GetFullPath(mediaPath);
+            // Opening the file, rather than File.Exists, preserves access-denied and I/O errors.
+            using (var file = File.Open(_mediaPath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (file.Length == 0)
+                    throw new InvalidDataException("The media file is empty.");
+            }
+            _currentMedia = new Media(_libVlc, new Uri(_mediaPath));
             _mediaPlayer.Media = _currentMedia;
             IsLoaded = true;
             _requestedState = PlaybackState.Opening;
@@ -95,36 +126,38 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             IsSubtitleLoaded = false;
             CurrentSubtitlePath = null;
             OffsetMilliseconds = 0;
-        }
+        });
     }
 
     public void Play()
     {
-        lock (_commandGate)
+        ExecuteCommand("Play", () =>
         {
+            if (!_disposed && LastError != null && _mediaPath != null)
+                Open(_mediaPath);
             if (_disposed || !IsLoaded || _requestedState == PlaybackState.Playing) return;
             var resume = _requestedState == PlaybackState.Paused;
             _requestedState = PlaybackState.Playing;
             if (resume)
                 _mediaPlayer.SetPause(false);
             else if (!_mediaPlayer.Play())
-                Complete(PlaybackState.Error);
-        }
+                FailPlayback("VLC.Play returned false");
+        });
     }
 
     public void Pause()
     {
-        lock (_commandGate)
+        ExecuteCommand("Pause", () =>
         {
             if (_disposed || !IsLoaded || _requestedState != PlaybackState.Playing) return;
             _requestedState = PlaybackState.Paused;
             _mediaPlayer.SetPause(true);
-        }
+        });
     }
 
     public void Stop()
     {
-        lock (_commandGate)
+        ExecuteCommand("Stop", () =>
         {
             if (_disposed || !IsLoaded) return;
             _requestedState = PlaybackState.Stopped;
@@ -134,12 +167,12 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             SetState(PlaybackState.Stopped);
             TimeChanged?.Invoke(this, TimeSpan.Zero);
             PositionChanged?.Invoke(this, 0);
-        }
+        });
     }
 
     public void Seek(double positionPercent)
     {
-        lock (_commandGate)
+        ExecuteCommand("Seek", () =>
         {
             if (_disposed || !IsLoaded || !double.IsFinite(positionPercent) ||
                 !_mediaPlayer.IsSeekable || _mediaPlayer.Length <= 0 ||
@@ -153,16 +186,16 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             // VLC's time seek flushes the demux/decoder buffers and resets its shared A/V clock.
             // Do not stop/restart playback or toggle pause around this asynchronous operation.
             _mediaPlayer.Time = _seekTarget;
-        }
+        });
     }
 
     public void SetVolume(int volume)
     {
-        lock (_commandGate)
+        ExecuteCommand("SetVolume", () =>
         {
             if (_disposed) return;
             _mediaPlayer.Volume = Math.Clamp(volume, 0, 100);
-        }
+        });
     }
 
     public bool TryLoad(string subtitlePath, out string? errorMessage)
@@ -239,6 +272,103 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         SetState(state);
     }
 
+    private void ExecuteCommand(string operation, Action command)
+    {
+        lock (_commandGate)
+        {
+            if (_disposed) return;
+            try
+            {
+                command();
+            }
+            catch (Exception exception)
+            {
+                FailPlayback(operation, exception);
+            }
+        }
+    }
+
+    private void OnVlcLog(object? sender, LogEventArgs e)
+    {
+        if (e.Level != LogLevel.Error && e.Level != LogLevel.Warning) return;
+        // Bound diagnostic history independently of playback state and native command locks.
+        var diagnostic = $"{e.Level} [{e.Module}] {e.Message}";
+        if (diagnostic.Length > 2048) diagnostic = diagnostic[..2048];
+        lock (_diagnosticGate)
+        {
+            if (_nativeErrors.Count == 16) _nativeErrors.Dequeue();
+            _nativeErrors.Enqueue(diagnostic);
+        }
+        // LibVLCSharp delivers Log via Task.Run: it cannot be attributed to the active media.
+        // Write late diagnostics too, but never use this engine-wide history for classification.
+        Trace.TraceWarning($"VLC diagnostic (unattributed): {diagnostic}");
+    }
+
+    private void FailPlayback(string operation, Exception? exception = null, string? nativeDiagnostic = null)
+    {
+        if (LastError != null) return;
+        string diagnostic;
+        lock (_diagnosticGate) diagnostic = string.Join(Environment.NewLine, _nativeErrors);
+        var kind = exception switch
+        {
+            FileNotFoundException or DirectoryNotFoundException => PlaybackErrorKind.FileNotFound,
+            UnauthorizedAccessException or System.Security.SecurityException => PlaybackErrorKind.AccessDenied,
+            InvalidDataException => PlaybackErrorKind.Decoding,
+            IOException => PlaybackErrorKind.InputOutput,
+            _ => ClassifyNativeError(nativeDiagnostic ?? "")
+        };
+        LastError = new PlaybackError(kind);
+        Trace.TraceError($"Playback failure: operation={operation}, kind={kind}, file={_mediaPath}, " +
+            $"state={State}, HRESULT={exception?.HResult:X8}{Environment.NewLine}{exception}" +
+            $"{Environment.NewLine}VLC error callback: {nativeDiagnostic}" +
+            $"{Environment.NewLine}Recent engine diagnostics (unattributed):{Environment.NewLine}{diagnostic}");
+
+        _requestedState = PlaybackState.Error;
+        IsLoaded = false;
+        try
+        {
+            _mediaPlayer.Stop();
+            _mediaPlayer.Media = null;
+            _currentMedia?.Dispose();
+            _currentMedia = null;
+        }
+        catch (Exception cleanupException)
+        {
+            Trace.TraceError($"Playback failure cleanup: {cleanupException}");
+        }
+        Interlocked.Increment(ref _mediaVersion);
+        ResetTimeline();
+        IsSubtitleLoaded = false;
+        CurrentSubtitlePath = null;
+        OffsetMilliseconds = 0;
+        SetState(PlaybackState.Error);
+        TimeChanged?.Invoke(this, TimeSpan.Zero);
+        PositionChanged?.Invoke(this, 0);
+        PlaybackFailed?.Invoke(this, LastError);
+    }
+
+    private static PlaybackErrorKind ClassifyNativeError(string diagnostic)
+    {
+        // EncounteredError has no error code. Only classify explicit native evidence.
+        if (diagnostic.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
+            return PlaybackErrorKind.FileNotFound;
+        if (diagnostic.Contains("Permission denied", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("Access denied", StringComparison.OrdinalIgnoreCase))
+            return PlaybackErrorKind.AccessDenied;
+        if (diagnostic.Contains("Input/output error", StringComparison.OrdinalIgnoreCase))
+            return PlaybackErrorKind.InputOutput;
+        if (diagnostic.Contains("no suitable decoder module", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("no decoder modules matched", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("Codec not supported", StringComparison.OrdinalIgnoreCase))
+            return PlaybackErrorKind.UnsupportedCodec;
+        if (diagnostic.Contains("cannot peek", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("moov atom not found", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("invalid data", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("decoding failed", StringComparison.OrdinalIgnoreCase))
+            return PlaybackErrorKind.Decoding;
+        return PlaybackErrorKind.Unknown;
+    }
+
     private void ResetTimeline()
     {
         Interlocked.Increment(ref _timelineVersion);
@@ -299,6 +429,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             _mediaPlayer.Stop();
             _mediaPlayer.Dispose();
             _currentMedia?.Dispose();
+            _libVlc.UnsetDialogHandlers();
+            _libVlc.Log -= OnVlcLog;
             _libVlc.Dispose();
         }
     }

@@ -80,3 +80,55 @@ VLC owns audio/video clock and decoder-buffer resynchronization during a time
 seek. The service preserves play/pause intent rather than forcing a restart.
 Visual A/V validation on real hardware is still required; timestamp logs alone
 cannot establish lip-sync accuracy or guarantee frame delivery under overload.
+
+## Playback failures and recovery (#2)
+
+Playback failures show an actionable Korean message for missing files, read
+permissions, I/O errors, unavailable codecs, damaged/undecodable data, or an
+unknown cause. Failed playback is stopped, the timeline/subtitle UI is reset, and
+the application stays open. After fixing the problem, click **재생** to reopen
+the last requested file, or **열기** to choose another file. Opening a new file
+invalidates pending errors from the previous session.
+
+The app writes diagnostics to
+`%LOCALAPPDATA%\SavienPlayer\Logs\playback-YYYYMMDD-PID.log`. The error dialog
+includes the path. Logs contain the operation, error category, local media path,
+playback state, managed HRESULT/stack trace when available, and up to 16 recent
+VLC warnings/errors (each limited to 2,048 characters). VLC's log events are
+delivered asynchronously, so these engine-wide records are explicitly marked
+unattributed and are not used to classify the current file. Late log events are
+also written individually. Logs are local only and
+can contain private file paths; review/redact them before sharing and delete old
+logs as needed. If logging cannot be initialized, a debugger trace is still
+attempted. A later disk-write failure disables the file listener rather than
+crashing playback.
+
+VLC's `EncounteredError` event does not provide a structured error code.
+Codec/decoding classifications therefore require explicit evidence from a
+session-versioned VLC error-dialog callback; ambiguous failures remain
+**Unknown** rather than guessing from file
+extensions. An empty file is classified as damaged data before invoking VLC.
+The player does not claim that every malformed file or partially unsupported
+audio/video track will produce a fatal VLC error.
+
+### Failure/recovery checks (Windows + VLC)
+
+The existing test project has no runner; these are manual scenarios, not
+automated test results. Run as a normal user (not administrator):
+
+| Case | Setup | Expected result |
+| --- | --- | --- |
+| Missing file | Open a valid file, stop, delete/rename it, then click Play | Missing-file message; no crash |
+| Read permission | Remove the current user's read access to a test copy, then select it | Permission-specific message, not missing-file |
+| Damaged data | Open an empty `.mp4`, then a truncated copy of a known-good video | Empty file reports damaged data; native failure on truncated media includes VLC diagnostics, possibly Unknown if inconclusive |
+| Unsupported codec | Use a known sample requiring a decoder absent from the installed VLC build | When VLC reports an explicit missing-decoder failure, codec-specific advice; no inference from the extension alone |
+| I/O failure | Keep a test file exclusively locked by another process, then open it | I/O-specific message and managed error code/stack |
+| Native/runtime setup | Launch without a compatible 64-bit VLC runtime | Startup guidance and diagnostic log, followed by clean exit |
+
+After each playback failure, restore access/the file and click Play, then open
+a different valid file. Confirm audio/video, seek, pause/resume, and subtitles
+work again, and the previous error dialog does not reappear. Check one failure
+record per attempt, the matching category/file, and either a managed exception
+or native diagnostic context. Also deny log-folder writes and verify playback
+errors still show without a secondary crash. Re-run the #1 stress scenarios to
+check the nonblocking native-callback/UI boundary.

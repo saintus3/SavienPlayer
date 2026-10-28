@@ -7,9 +7,11 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     public event EventHandler<double>? PositionChanged;
     public event EventHandler<TimeSpan>? TimeChanged;
     public event EventHandler<PlaybackState>? PlaybackStateChanged;
+    public event EventHandler<PlaybackError>? PlaybackFailed;
 
     public bool IsLoaded { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.None;
+    public PlaybackError? LastError => null;
 
     public void Open(string mediaPath)
     {

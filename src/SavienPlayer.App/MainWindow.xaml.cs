@@ -15,10 +15,11 @@ public partial class MainWindow : Window
 
     public MainWindow(IMediaPlayerService playerService)
     {
+        _playerService = playerService;
         InitializeComponent();
 
-        _playerService = playerService;
         _playerService.PositionChanged += PlayerServiceOnPositionChanged;
+        _playerService.PlaybackFailed += PlayerServiceOnPlaybackFailed;
 
         if (playerService is not VlcMediaPlayerService vlc)
         {
@@ -42,7 +43,8 @@ public partial class MainWindow : Window
         {
             Interlocked.Increment(ref _positionVersion);
             _playerService.Open(dialog.FileName);
-            _playerService.Play();
+            if (_playerService.IsLoaded)
+                _playerService.Play();
             SubtitleStatusText.Text = "자막: 없음";
             SubtitleOffsetBox.Text = "0";
         }
@@ -135,5 +137,28 @@ public partial class MainWindow : Window
             if (version == _positionVersion && !SeekBar.IsMouseCaptureWithin)
                 SeekBar.Value = position;
         }));
+    }
+
+    private void PlayerServiceOnPlaybackFailed(object? sender, PlaybackError error)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!ReferenceEquals(_playerService.LastError, error) || !IsVisible) return;
+            Interlocked.Increment(ref _positionVersion);
+            SeekBar.Value = 0;
+            SubtitleStatusText.Text = "자막: 없음";
+            SubtitleOffsetBox.Text = "0";
+            MessageBox.Show(this, error.Message +
+                "\n\n문제를 해결한 후 '재생'을 누르면 다시 시도합니다. '열기'로 다른 파일을 선택할 수도 있습니다." +
+                App.LogLocationMessage, "SavienPlayer - 재생 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }));
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _playerService.PositionChanged -= PlayerServiceOnPositionChanged;
+        _playerService.PlaybackFailed -= PlayerServiceOnPlaybackFailed;
+        VideoView.MediaPlayer = null;
+        base.OnClosed(e);
     }
 }
