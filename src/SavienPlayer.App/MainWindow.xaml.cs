@@ -111,7 +111,7 @@ public partial class MainWindow : Window
 
     private void PauseButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _playbackRequested = false;
+        _playbackRequested = _playerService.State == PlaybackState.Paused;
         _playerService.Pause();
         Interlocked.Increment(ref _playbackVersion);
     }
