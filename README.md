@@ -10,25 +10,30 @@ Windows C# video player (WPF, .NET 8) inspired by modern desktop players.
 ## Tech Stack
 - C# / .NET 8
 - WPF
-- LibVLCSharp (planned integration)
+- LibVLCSharp
 - Serilog (planned integration)
 
-## Roadmap
-1. Bootstrap WPF solution and projects
-2. Implement media player service abstraction
-3. Wire playback controls and timeline
-4. Add subtitle loading/sync and settings
-5. Stabilize and package for Windows
+## Current Status
+- WPF app bootstrap complete
+- LibVLCSharp integrated
+- Open / Play / Pause / Stop / Seek / Volume / Fullscreen wired
+
+## Prerequisites (Important)
+LibVLCSharp uses native VLC runtime. Install one of:
+- VLC player (64-bit) in default location, or
+- LibVLC native binaries deployment strategy for app distribution
+
+If playback does not start, verify VLC runtime is installed.
 
 ## Run
 Prerequisites:
 - Visual Studio 2022 or newer
 - .NET 8 SDK
 
-Open the solution and run `SavienPlayer.App`.
+Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
 
 ## Project Structure
 - `src/SavienPlayer.App` - WPF UI layer
 - `src/SavienPlayer.Core` - domain models and interfaces
-- `src/SavienPlayer.Infrastructure` - infrastructure implementations (stub for now)
+- `src/SavienPlayer.Infrastructure` - VLC-based media player service
 - `tests/SavienPlayer.Tests` - test project placeholder

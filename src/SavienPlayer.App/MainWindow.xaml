@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         mc:Ignorable="d"
         Title="SavienPlayer" Height="640" Width="1024" MinWidth="900" MinHeight="560"
         Background="#111111" Foreground="White">
@@ -13,30 +14,26 @@
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1">
-            <Grid>
-                <TextBlock Text="Video Surface (LibVLCSharp 연결 예정)"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           Opacity="0.6"
-                           FontSize="20"/>
-            </Grid>
+            <vlc:VideoView x:Name="VideoView"/>
         </Border>
 
         <StackPanel Grid.Row="1" Margin="0,10,0,0">
-            <Slider Minimum="0" Maximum="100" Value="0" Height="24"/>
+            <Slider x:Name="SeekBar" Minimum="0" Maximum="100" Value="0" Height="24"
+                    PreviewMouseUp="SeekBar_OnPreviewMouseUp"/>
 
             <DockPanel Margin="0,10,0,0" LastChildFill="False">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Content="열기" Width="70" Margin="0,0,8,0"/>
-                    <Button Content="재생" Width="70" Margin="0,0,8,0"/>
-                    <Button Content="일시정지" Width="80" Margin="0,0,8,0"/>
-                    <Button Content="정지" Width="70"/>
+                    <Button Content="열기" Width="70" Margin="0,0,8,0" Click="OpenButton_OnClick"/>
+                    <Button Content="재생" Width="70" Margin="0,0,8,0" Click="PlayButton_OnClick"/>
+                    <Button Content="일시정지" Width="80" Margin="0,0,8,0" Click="PauseButton_OnClick"/>
+                    <Button Content="정지" Width="70" Click="StopButton_OnClick"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                     <TextBlock Text="볼륨" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <Slider Width="120" Minimum="0" Maximum="100" Value="70"/>
-                    <Button Content="전체화면" Width="90" Margin="10,0,0,0"/>
+                    <Slider x:Name="VolumeBar" Width="120" Minimum="0" Maximum="100" Value="70"
+                            ValueChanged="VolumeBar_OnValueChanged"/>
+                    <Button Content="전체화면" Width="90" Margin="10,0,0,0" Click="FullscreenButton_OnClick"/>
                 </StackPanel>
             </DockPanel>
         </StackPanel>

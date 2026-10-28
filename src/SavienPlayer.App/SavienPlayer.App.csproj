@@ -13,4 +13,8 @@
     <ProjectReference Include="..\SavienPlayer.Infrastructure\SavienPlayer.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
+  </ItemGroup>
+
 </Project>
