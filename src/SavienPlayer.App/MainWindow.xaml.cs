@@ -122,6 +122,10 @@ public partial class MainWindow : Window
 
     private void PlayerServiceOnPositionChanged(object? sender, double position)
     {
-        Dispatcher.Invoke(() => SeekBar.Value = position);
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!SeekBar.IsMouseCaptureWithin)
+                SeekBar.Value = position;
+        }));
     }
 }
