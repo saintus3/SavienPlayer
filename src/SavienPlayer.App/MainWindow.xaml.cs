@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private readonly IMediaPlayerService _playerService;
     private readonly ISubtitleService _subtitleService;
     private bool _isFullscreen;
+    private int _positionVersion;
 
     public MainWindow(IMediaPlayerService playerService)
     {
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog() == true)
         {
+            Interlocked.Increment(ref _positionVersion);
             _playerService.Open(dialog.FileName);
             _playerService.Play();
             SubtitleStatusText.Text = "자막: 없음";
@@ -48,10 +50,15 @@ public partial class MainWindow : Window
 
     private void PlayButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Play();
     private void PauseButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Pause();
-    private void StopButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Stop();
+    private void StopButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        Interlocked.Increment(ref _positionVersion);
+        _playerService.Stop();
+    }
 
     private void SeekBar_OnPreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        Interlocked.Increment(ref _positionVersion);
         _playerService.Seek(SeekBar.Value);
     }
 
@@ -122,9 +129,10 @@ public partial class MainWindow : Window
 
     private void PlayerServiceOnPositionChanged(object? sender, double position)
     {
+        var version = Volatile.Read(ref _positionVersion);
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (!SeekBar.IsMouseCaptureWithin)
+            if (version == _positionVersion && !SeekBar.IsMouseCaptureWithin)
                 SeekBar.Value = position;
         }));
     }
