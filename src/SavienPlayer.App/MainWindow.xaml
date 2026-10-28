@@ -98,6 +98,11 @@
                        FontSize="12"
                        Opacity="0.85"
                        Text="자막: 없음"/>
+            <CheckBox x:Name="PerformanceLoggingBox" Content="성능 로그 기록 (5초 간격)"
+                      Margin="0,8,0,0" Checked="PerformanceLoggingBox_OnChanged"
+                      Unchecked="PerformanceLoggingBox_OnChanged"/>
+            <TextBlock x:Name="PerformanceStatusText" Text="성능 로그: 꺼짐"
+                       FontSize="11" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
     </Grid>
 </Window>

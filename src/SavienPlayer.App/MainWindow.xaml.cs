@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using SavienPlayer.Core;
 using SavienPlayer.Infrastructure;
@@ -20,6 +21,10 @@ public partial class MainWindow : Window
     private long _playbackVersion;
     private bool _playbackRequested;
     private bool _isClosing;
+    private readonly LatestValue<(long Version, double Position)> _latestPosition = new();
+    private readonly DispatcherTimer _positionTimer;
+    private PerformanceLogSession? _performanceSession;
+    private long _performanceLogVersion;
 
     public MainWindow(IMediaPlayerService playerService)
     {
@@ -32,6 +37,12 @@ public partial class MainWindow : Window
         _subtitleService = vlc;
 
         InitializeComponent();
+        _positionTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _positionTimer.Tick += PositionTimer_OnTick;
+        _positionTimer.Start();
 
         PlaylistList.ItemsSource = _playlist.Items;
         try
@@ -291,11 +302,48 @@ public partial class MainWindow : Window
 
     private void PlayerServiceOnPositionChanged(object? sender, double position)
     {
-        var version = Interlocked.Read(ref _playbackVersion);
-        Dispatcher.BeginInvoke(() =>
+        _latestPosition.Publish((Interlocked.Read(ref _playbackVersion), position));
+    }
+
+    private void PositionTimer_OnTick(object? sender, EventArgs e)
+    {
+        if (!_isClosing && _latestPosition.TryTake(out var latest) &&
+            latest.Version == Interlocked.Read(ref _playbackVersion))
         {
-            if (!_isClosing && version == Interlocked.Read(ref _playbackVersion)) SeekBar.Value = position;
-        });
+            SeekBar.Value = latest.Position;
+        }
+    }
+
+    private void PerformanceLoggingBox_OnChanged(object sender, RoutedEventArgs e)
+    {
+        var version = ++_performanceLogVersion;
+        if (PerformanceLoggingBox.IsChecked != true)
+        {
+            _performanceSession?.Dispose();
+            _performanceSession = null;
+            PerformanceStatusText.Text = "성능 로그: 꺼짐";
+            return;
+        }
+
+        try
+        {
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SavienPlayer", "Performance");
+            _performanceSession = new PerformanceLogSession(directory,
+                ((VlcMediaPlayerService)_playerService).GetPerformanceSnapshot,
+                _ => Dispatcher.BeginInvoke(() =>
+                {
+                    if (_isClosing || version != _performanceLogVersion) return;
+                    PerformanceLoggingBox.IsChecked = false;
+                    PerformanceStatusText.Text = "성능 로그: 기록 실패";
+                }));
+            PerformanceStatusText.Text = $"성능 로그: {_performanceSession.LogPath}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            PerformanceLoggingBox.IsChecked = false;
+            PerformanceStatusText.Text = "성능 로그: 파일 생성 실패";
+        }
     }
 
     private void PlayerServiceOnPlaybackStateChanged(object? sender, PlaybackState state)
@@ -321,8 +369,11 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosing = true;
+        _positionTimer.Stop();
+        _positionTimer.Tick -= PositionTimer_OnTick;
         _playerService.PositionChanged -= PlayerServiceOnPositionChanged;
         _playerService.PlaybackStateChanged -= PlayerServiceOnPlaybackStateChanged;
+        _performanceSession?.Dispose();
         base.OnClosed(e);
     }
 }

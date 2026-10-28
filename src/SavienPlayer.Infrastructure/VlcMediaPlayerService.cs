@@ -8,6 +8,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private Media? _currentMedia;
+    private readonly object _mediaGate = new();
+    private long _mediaGeneration;
 
     public event EventHandler<double>? PositionChanged;
     public event EventHandler<TimeSpan>? TimeChanged;
@@ -42,9 +44,13 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
     public void Open(string mediaPath)
     {
-        _currentMedia?.Dispose();
-        _currentMedia = new Media(_libVlc, new Uri(mediaPath));
-        _mediaPlayer.Media = _currentMedia;
+        lock (_mediaGate)
+        {
+            _currentMedia?.Dispose();
+            _currentMedia = new Media(_libVlc, new Uri(mediaPath));
+            _mediaPlayer.Media = _currentMedia;
+            _mediaGeneration++;
+        }
         IsLoaded = true;
         SetState(PlaybackState.Opening);
 
@@ -138,9 +144,23 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         PlaybackStateChanged?.Invoke(this, state);
     }
 
+    public PlaybackPerformanceSnapshot GetPerformanceSnapshot()
+    {
+        lock (_mediaGate)
+        {
+            var stats = _currentMedia?.Statistics;
+            return new PlaybackPerformanceSnapshot(_mediaGeneration, State,
+                stats?.DecodedVideo, stats?.DisplayedPictures, stats?.LostPictures);
+        }
+    }
+
     public void Dispose()
     {
-        _currentMedia?.Dispose();
+        lock (_mediaGate)
+        {
+            _currentMedia?.Dispose();
+            _currentMedia = null;
+        }
         _mediaPlayer.Dispose();
         _libVlc.Dispose();
     }
