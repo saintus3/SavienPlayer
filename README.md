@@ -17,6 +17,7 @@ Windows C# video player (WPF, .NET 8) inspired by modern desktop players.
 - WPF app bootstrap complete
 - LibVLCSharp integrated
 - Open / Play / Pause / Stop / Seek / Volume / Fullscreen wired
+- Subtitle v1: load/clear + sync(ms) apply
 
 ## Prerequisites (Important)
 LibVLCSharp uses native VLC runtime. Install one of:
@@ -31,6 +32,14 @@ Prerequisites:
 - .NET 8 SDK
 
 Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
+
+## Subtitle v1 Usage
+1. Open a video file
+2. Click `자막 열기` and select `.srt` (or `.ass/.ssa/.vtt`)
+3. Enter sync offset in milliseconds and click `적용`
+   - Positive: subtitle later
+   - Negative: subtitle earlier
+4. Click `자막 해제` to clear subtitle state
 
 ## Project Structure
 - `src/SavienPlayer.App` - WPF UI layer

@@ -3,7 +3,7 @@ using LibVLCSharp.Shared;
 
 namespace SavienPlayer.Infrastructure;
 
-public sealed class VlcMediaPlayerService : IMediaPlayerService, IDisposable
+public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleService, IDisposable
 {
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
@@ -17,6 +17,11 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, IDisposable
     public PlaybackState State { get; private set; } = PlaybackState.None;
 
     public MediaPlayer NativePlayer => _mediaPlayer;
+
+    public bool IsSubtitleLoaded { get; private set; }
+    public string? CurrentSubtitlePath { get; private set; }
+    public int OffsetMilliseconds { get; private set; }
+    bool ISubtitleService.IsLoaded => IsSubtitleLoaded;
 
     public VlcMediaPlayerService()
     {
@@ -42,6 +47,10 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, IDisposable
         _mediaPlayer.Media = _currentMedia;
         IsLoaded = true;
         SetState(PlaybackState.Opening);
+
+        IsSubtitleLoaded = false;
+        CurrentSubtitlePath = null;
+        OffsetMilliseconds = 0;
     }
 
     public void Play()
@@ -72,6 +81,54 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, IDisposable
     public void SetVolume(int volume)
     {
         _mediaPlayer.Volume = Math.Clamp(volume, 0, 100);
+    }
+
+    public bool TryLoad(string subtitlePath, out string? errorMessage)
+    {
+        errorMessage = null;
+
+        if (!IsLoaded)
+        {
+            errorMessage = "먼저 동영상을 열어주세요.";
+            return false;
+        }
+
+        if (!File.Exists(subtitlePath))
+        {
+            errorMessage = "자막 파일을 찾을 수 없습니다.";
+            return false;
+        }
+
+        var ok = _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, subtitlePath, true);
+        if (!ok)
+        {
+            errorMessage = "자막 로드에 실패했습니다.";
+            return false;
+        }
+
+        IsSubtitleLoaded = true;
+        CurrentSubtitlePath = subtitlePath;
+
+        if (OffsetMilliseconds != 0)
+        {
+            _mediaPlayer.SetSpuDelay(OffsetMilliseconds * 1000L);
+        }
+
+        return true;
+    }
+
+    public void Clear()
+    {
+        IsSubtitleLoaded = false;
+        CurrentSubtitlePath = null;
+        OffsetMilliseconds = 0;
+        _mediaPlayer.SetSpuDelay(0);
+    }
+
+    public void SetOffset(int milliseconds)
+    {
+        OffsetMilliseconds = milliseconds;
+        _mediaPlayer.SetSpuDelay(milliseconds * 1000L);
     }
 
     private void SetState(PlaybackState state)

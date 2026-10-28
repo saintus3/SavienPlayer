@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         mc:Ignorable="d"
-        Title="SavienPlayer" Height="640" Width="1024" MinWidth="900" MinHeight="560"
+        Title="SavienPlayer" Height="680" Width="1100" MinWidth="900" MinHeight="560"
         Background="#111111" Foreground="White">
     <Grid Margin="12">
         <Grid.RowDefinitions>
@@ -36,6 +36,25 @@
                     <Button Content="전체화면" Width="90" Margin="10,0,0,0" Click="FullscreenButton_OnClick"/>
                 </StackPanel>
             </DockPanel>
+
+            <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button Content="자막 열기" Width="90" Margin="0,0,8,0" Click="OpenSubtitleButton_OnClick"/>
+                    <Button Content="자막 해제" Width="90" Margin="0,0,8,0" Click="ClearSubtitleButton_OnClick"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <TextBlock Text="자막 싱크(ms)" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="SubtitleOffsetBox" Width="90" Text="0" Margin="0,0,8,0"/>
+                    <Button Content="적용" Width="60" Click="ApplySubtitleOffsetButton_OnClick"/>
+                </StackPanel>
+            </DockPanel>
+
+            <TextBlock x:Name="SubtitleStatusText"
+                       Margin="0,8,0,0"
+                       FontSize="12"
+                       Opacity="0.85"
+                       Text="자막: 없음"/>
         </StackPanel>
     </Grid>
 </Window>
