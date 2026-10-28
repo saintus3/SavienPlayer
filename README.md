@@ -282,8 +282,9 @@ continues to be saved and restored.
 
 Playback keys use a single UI-thread message filter for the main window and
 `VideoView.Content` foreground window, including native child video HWNDs.
-Clicking the video focuses a transparent WPF input surface in that foreground
-window. This keeps interactive key input on the UI thread rather than VLC's
+Clicking the video focuses a near-transparent WPF input surface (1/255 black
+alpha, so layered-window hit testing does not pass clicks through) in that
+foreground window. This keeps interactive key input on the UI thread rather than VLC's
 separate video thread, where WPF's message filter cannot intercept it. The input
 surface intentionally handles video-area mouse hit testing; native DVD/menu mouse
 interaction is not supported through this surface.
