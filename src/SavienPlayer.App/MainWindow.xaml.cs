@@ -1,5 +1,8 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
 using SavienPlayer.Core;
 using SavienPlayer.Infrastructure;
@@ -10,7 +13,12 @@ public partial class MainWindow : Window
 {
     private readonly IMediaPlayerService _playerService;
     private readonly ISubtitleService _subtitleService;
+    private readonly Playlist _playlist = new();
     private bool _isFullscreen;
+    private Point _dragStart;
+    private PlaylistItem? _dragItem;
+    private long _playbackVersion;
+    private bool _isClosing;
 
     public MainWindow(IMediaPlayerService playerService)
     {
@@ -24,7 +32,19 @@ public partial class MainWindow : Window
 
         InitializeComponent();
 
+        PlaylistList.ItemsSource = _playlist.Items;
+        try
+        {
+            PlaylistStore.Load(_playlist);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show("플레이리스트를 복원하지 못했습니다.", "SavienPlayer", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        AllowDuplicatesBox.IsChecked = _playlist.AllowDuplicates;
+
         _playerService.PositionChanged += PlayerServiceOnPositionChanged;
+        _playerService.PlaybackStateChanged += PlayerServiceOnPlaybackStateChanged;
         VideoView.MediaPlayer = vlc.NativePlayer;
 
         _playerService.SetVolume((int)VolumeBar.Value);
@@ -32,23 +52,166 @@ public partial class MainWindow : Window
 
     private void OpenButton_OnClick(object sender, RoutedEventArgs e)
     {
+        AddFiles(true);
+    }
+
+    private void AddFilesButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        AddFiles(false);
+    }
+
+    private void AddFiles(bool play)
+    {
         var dialog = new OpenFileDialog
         {
-            Filter = "Video Files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.ts;*.m4v|All Files|*.*"
+            Filter = "Video Files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.ts;*.m4v|All Files|*.*",
+            Multiselect = true
         };
 
         if (dialog.ShowDialog() == true)
         {
-            _playerService.Open(dialog.FileName);
-            _playerService.Play();
-            SubtitleStatusText.Text = "자막: 없음";
-            SubtitleOffsetBox.Text = "0";
+            PlaylistItem? first = null;
+            foreach (var file in dialog.FileNames)
+            {
+                var item = _playlist.Add(file);
+                first ??= item;
+            }
+            SavePlaylist();
+            if (play && first is not null) OpenPlaylistItem(first);
         }
     }
 
-    private void PlayButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Play();
-    private void PauseButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Pause();
-    private void StopButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Stop();
+    private void OpenPlaylistItem(PlaylistItem item, bool play = true)
+    {
+        _playerService.Stop();
+        Interlocked.Increment(ref _playbackVersion);
+        _playlist.SetCurrent(item);
+        _playerService.Open(item.FilePath);
+        SeekBar.Value = 0;
+        SubtitleStatusText.Text = "자막: 없음";
+        SubtitleOffsetBox.Text = "0";
+        PlaylistList.ScrollIntoView(item);
+        if (play) _playerService.Play();
+    }
+
+    private void PlayButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_playlist.Current is null)
+        {
+            var item = PlaylistList.SelectedItem as PlaylistItem ?? _playlist.GetNext();
+            if (item is not null) OpenPlaylistItem(item);
+            return;
+        }
+        Interlocked.Increment(ref _playbackVersion);
+        _playerService.Play();
+    }
+
+    private void PauseButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _playerService.Pause();
+        Interlocked.Increment(ref _playbackVersion);
+    }
+
+    private void StopButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _playerService.Stop();
+        Interlocked.Increment(ref _playbackVersion);
+    }
+
+    private void NextButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var next = _playlist.GetNext();
+        if (next is not null) OpenPlaylistItem(next);
+    }
+
+    private void RemoveFilesButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var current = _playlist.Current;
+        var wasPlaying = _playerService.State is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Opening;
+        _playlist.Remove(PlaylistList.SelectedItems.Cast<PlaylistItem>().ToArray());
+        if (current != _playlist.Current)
+        {
+            if (_playlist.Current is not null)
+            {
+                OpenPlaylistItem(_playlist.Current, wasPlaying);
+            }
+            else
+            {
+                _playerService.Stop();
+                Interlocked.Increment(ref _playbackVersion);
+                SeekBar.Value = 0;
+                SubtitleStatusText.Text = "자막: 없음";
+                SubtitleOffsetBox.Text = "0";
+            }
+        }
+        SavePlaylist();
+    }
+
+    private void AllowDuplicatesBox_OnChanged(object sender, RoutedEventArgs e)
+    {
+        _playlist.AllowDuplicates = AllowDuplicatesBox.IsChecked == true;
+        SavePlaylist();
+    }
+
+    private void PlaylistList_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source &&
+            ItemsControl.ContainerFromElement(PlaylistList, source) is ListBoxItem { DataContext: PlaylistItem item })
+        {
+            OpenPlaylistItem(item);
+        }
+    }
+
+    private void PlaylistList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(PlaylistList);
+        _dragItem = e.OriginalSource is DependencyObject source &&
+            ItemsControl.ContainerFromElement(PlaylistList, source) is ListBoxItem container
+            ? container.DataContext as PlaylistItem : null;
+    }
+
+    private void PlaylistList_OnPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _dragItem is null) return;
+        var position = e.GetPosition(PlaylistList);
+        if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        var item = _dragItem;
+        _dragItem = null;
+        DragDrop.DoDragDrop(PlaylistList, new DataObject(typeof(PlaylistItem), item), DragDropEffects.Move);
+    }
+
+    private void PlaylistList_OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetData(typeof(PlaylistItem)) is PlaylistItem item && _playlist.Items.Contains(item)
+            ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void PlaylistList_OnDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(PlaylistItem)) is not PlaylistItem item || !_playlist.Items.Contains(item)) return;
+        var target = e.OriginalSource is DependencyObject source
+            ? ItemsControl.ContainerFromElement(PlaylistList, source) as ListBoxItem : null;
+        var index = target?.DataContext is PlaylistItem targetItem
+            ? _playlist.Items.IndexOf(targetItem) : _playlist.Items.Count - 1;
+        _playlist.Move(item, index);
+        SavePlaylist();
+        e.Handled = true;
+    }
+
+    private void SavePlaylist()
+    {
+        try
+        {
+            PlaylistStore.Save(_playlist);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show("플레이리스트를 저장하지 못했습니다.", "SavienPlayer", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private void SeekBar_OnPreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
@@ -122,6 +285,31 @@ public partial class MainWindow : Window
 
     private void PlayerServiceOnPositionChanged(object? sender, double position)
     {
-        Dispatcher.Invoke(() => SeekBar.Value = position);
+        var version = Interlocked.Read(ref _playbackVersion);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_isClosing && version == Interlocked.Read(ref _playbackVersion)) SeekBar.Value = position;
+        });
+    }
+
+    private void PlayerServiceOnPlaybackStateChanged(object? sender, PlaybackState state)
+    {
+        if (state != PlaybackState.Ended) return;
+        var version = Interlocked.Read(ref _playbackVersion);
+        // Never open/stop VLC synchronously from its native event callback.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isClosing || version != Interlocked.Read(ref _playbackVersion) || _playlist.Current is null) return;
+            var next = _playlist.GetNext();
+            if (next is not null) OpenPlaylistItem(next);
+        });
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosing = true;
+        _playerService.PositionChanged -= PlayerServiceOnPositionChanged;
+        _playerService.PlaybackStateChanged -= PlayerServiceOnPlaybackStateChanged;
+        base.OnClosed(e);
     }
 }

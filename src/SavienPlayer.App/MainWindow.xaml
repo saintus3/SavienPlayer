@@ -13,9 +13,52 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1">
-            <vlc:VideoView x:Name="VideoView"/>
-        </Border>
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="280"/>
+            </Grid.ColumnDefinitions>
+            <Border CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1">
+                <vlc:VideoView x:Name="VideoView"/>
+            </Border>
+            <DockPanel Grid.Column="1" Margin="10,0,0,0">
+                <StackPanel DockPanel.Dock="Top">
+                    <TextBlock Text="플레이리스트" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="파일 추가" Padding="8,4" Click="AddFilesButton_OnClick"/>
+                        <Button Content="선택 삭제" Padding="8,4" Margin="8,0,0,0" Click="RemoveFilesButton_OnClick"/>
+                        <Button Content="다음" Padding="8,4" Margin="8,0,0,0" Click="NextButton_OnClick"/>
+                    </StackPanel>
+                    <CheckBox x:Name="AllowDuplicatesBox" Content="중복 추가 허용" Margin="0,0,0,8"
+                              Checked="AllowDuplicatesBox_OnChanged" Unchecked="AllowDuplicatesBox_OnChanged"/>
+                    <TextBlock Text="더블클릭: 재생 · 드래그: 순서 변경" FontSize="11" Margin="0,0,0,8"/>
+                </StackPanel>
+                <ListBox x:Name="PlaylistList" SelectionMode="Extended" AllowDrop="True"
+                         Background="#1B1B1B" Foreground="White"
+                         PreviewMouseLeftButtonDown="PlaylistList_OnPreviewMouseLeftButtonDown"
+                         PreviewMouseMove="PlaylistList_OnPreviewMouseMove"
+                         MouseDoubleClick="PlaylistList_OnMouseDoubleClick"
+                         DragOver="PlaylistList_OnDragOver" Drop="PlaylistList_OnDrop">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayName}" ToolTip="{Binding FilePath}"
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                <Setter Property="Foreground" Value="#55DD99"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Grid>
 
         <StackPanel Grid.Row="1" Margin="0,10,0,0">
             <Slider x:Name="SeekBar" Minimum="0" Maximum="100" Value="0" Height="24"
