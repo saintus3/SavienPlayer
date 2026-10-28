@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private Point _dragStart;
     private PlaylistItem? _dragItem;
     private long _playbackVersion;
+    private bool _playbackRequested;
     private bool _isClosing;
 
     public MainWindow(IMediaPlayerService playerService)
@@ -85,6 +86,7 @@ public partial class MainWindow : Window
     {
         _playerService.Stop();
         Interlocked.Increment(ref _playbackVersion);
+        _playbackRequested = play;
         _playlist.SetCurrent(item);
         _playerService.Open(item.FilePath);
         SeekBar.Value = 0;
@@ -102,18 +104,21 @@ public partial class MainWindow : Window
             if (item is not null) OpenPlaylistItem(item);
             return;
         }
+        _playbackRequested = true;
         Interlocked.Increment(ref _playbackVersion);
         _playerService.Play();
     }
 
     private void PauseButton_OnClick(object sender, RoutedEventArgs e)
     {
+        _playbackRequested = false;
         _playerService.Pause();
         Interlocked.Increment(ref _playbackVersion);
     }
 
     private void StopButton_OnClick(object sender, RoutedEventArgs e)
     {
+        _playbackRequested = false;
         _playerService.Stop();
         Interlocked.Increment(ref _playbackVersion);
     }
@@ -127,7 +132,7 @@ public partial class MainWindow : Window
     private void RemoveFilesButton_OnClick(object sender, RoutedEventArgs e)
     {
         var current = _playlist.Current;
-        var wasPlaying = _playerService.State is PlaybackState.Playing or PlaybackState.Buffering or PlaybackState.Opening;
+        var wasPlaying = _playbackRequested;
         _playlist.Remove(PlaylistList.SelectedItems.Cast<PlaylistItem>().ToArray());
         if (current != _playlist.Current)
         {
@@ -137,6 +142,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                _playbackRequested = false;
                 _playerService.Stop();
                 Interlocked.Increment(ref _playbackVersion);
                 SeekBar.Value = 0;
@@ -294,14 +300,21 @@ public partial class MainWindow : Window
 
     private void PlayerServiceOnPlaybackStateChanged(object? sender, PlaybackState state)
     {
-        if (state != PlaybackState.Ended) return;
+        if (state is not (PlaybackState.Ended or PlaybackState.Error)) return;
         var version = Interlocked.Read(ref _playbackVersion);
         // Never open/stop VLC synchronously from its native event callback.
         Dispatcher.BeginInvoke(() =>
         {
             if (_isClosing || version != Interlocked.Read(ref _playbackVersion) || _playlist.Current is null) return;
+            if (state == PlaybackState.Error)
+            {
+                _playbackRequested = false;
+                return;
+            }
+            if (!_playbackRequested) return;
             var next = _playlist.GetNext();
             if (next is not null) OpenPlaylistItem(next);
+            else _playbackRequested = false;
         });
     }
 
