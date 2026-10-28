@@ -260,3 +260,67 @@ The test project still has no executable runner. On Windows/VLC:
    Verify all restore, then open a second video: preferences should carry over
    but its sidecar must replace the old cues. Test clear, pause/resume, Stop/Play,
    errors/retry, and the #1 stress scenarios in both rendering modes.
+
+## Playback keyboard shortcuts (#5)
+
+The same map applies in normal and fullscreen mode, including when a button,
+slider, native VLC video surface, or subtitle foreground window has focus:
+
+| Key | Action |
+| --- | --- |
+| Space | Play / pause (or retry after a playback error) |
+| Left / Right | Seek backward / forward 5 seconds |
+| Up / Down | Increase / decrease volume by 5 |
+| M | Toggle mute without changing the saved volume level |
+| F | Toggle fullscreen, preserving the previous windowed state |
+| Ctrl+[ / Ctrl+] | Subtitle earlier / later by 100 ms |
+
+Up increases volume by 5; Down decreases it by 5, clamped to 0–100. The
+**음소거 (M)** checkbox displays mute state and can also toggle it with the mouse.
+Volume adjustments unmute. Mute is session-only; the previous volume preference
+continues to be saved and restored.
+
+Playback keys use a single UI-thread message filter for the main window and
+`VideoView.Content` foreground window, including native child video HWNDs.
+Native VLC keyboard handling is disabled so a key cannot execute both VLC and
+application actions. This is not a system-wide hotkey hook: inactive app windows,
+file/error dialogs, and unrelated windows are excluded. The filter is removed
+when the main window closes.
+
+Text/password editors, combo boxes, and other selection controls keep their
+normal keyboard behavior (including subtitle offset editing and font selection).
+Elsewhere, playback keys take priority over a focused button or slider's default
+Space/arrow actions; use Tab and Enter or the mouse to operate those controls.
+Ctrl/Alt/Shift/Windows-modified playback keys are left alone, except the existing
+Ctrl+bracket subtitle shortcuts. Space/M/F ignore auto-repeat until released;
+arrows and Ctrl+brackets allow repeats. Seek/mute preserve paused playback.
+Unseekable/unknown-duration or stopped media ignore relative seeks. Rapid seeks
+accumulate from the pending target rather than stale progress-bar percentages,
+and are clamped to the media duration without changing play/pause intent.
+
+### Keyboard verification (Windows + VLC)
+
+The existing test project has no executable test runner. For each case below,
+repeat in normal and fullscreen modes, with custom subtitles and original VLC
+subtitles, and with/without an external subtitle:
+
+1. Focus a playback button, each slider, the native video area, and the subtitle
+   overlay. Check every shortcut once, including Space while buffering/starting.
+   One press must cause only one action. Hold Space/M/F: only one toggle; release
+   and press again: another toggle. Hold arrows: repeated steps.
+2. Play, then pause and press Left/Right repeatedly. Verify 5-second steps,
+   accumulation during rapid requests, clamping near zero/end, and paused state
+   preservation. Stop and seek: nothing should happen; Space should start again.
+3. Set volume to 35, press M twice, and confirm the slider remains 35 and sound
+   returns. Mute then press Up/Down (also at bounds); verify unmuting and 5-point
+   changes. Open another file while muted: it should remain muted for the session.
+4. Type/edit in the subtitle offset box, navigate font/position combo boxes and
+   their popups, and use Ctrl+A/C/V, Alt+F4 and modified arrow keys. No unintended
+   playback/volume/fullscreen action should occur. Verify Ctrl+brackets still work
+   outside editors/selection controls.
+5. Open a file dialog or playback error dialog and press the playback keys.
+   They must operate only the dialog, not the player behind it. Switch to another
+   app and repeat: the player must not react. Return, then verify shortcuts work.
+6. Repeat fullscreen toggles, subtitle sync changes and the #1 seek/pause stress
+   cases using keys; close/reopen the app and check saved volume, fullscreen and
+   last-position behavior. Check that closing removes the message filter.

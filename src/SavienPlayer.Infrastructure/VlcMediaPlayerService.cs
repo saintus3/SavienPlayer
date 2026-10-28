@@ -29,6 +29,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     private bool _subtitlesDisabled;
     private bool _originalSubtitleStyle;
     private string? _nativeSubtitlePath;
+    private bool _muted;
 
     public event EventHandler<double>? PositionChanged;
     public event EventHandler<TimeSpan>? TimeChanged;
@@ -64,6 +65,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC();
         _mediaPlayer = new MediaPlayer(_libVlc);
+        _mediaPlayer.EnableKeyInput = false;
         _libVlc.Log += OnVlcLog;
         _libVlc.SetDialogHandlers(
             (title, text) =>
@@ -92,6 +94,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         {
             if (!_playbackStarted) _resumeWaitStarted = Stopwatch.GetTimestamp();
             _playbackStarted = true;
+            _mediaPlayer.Mute = _muted;
             if (_originalSubtitleStyle && IsSubtitleLoaded)
             {
                 if (!ApplyOriginalSubtitle())
@@ -225,6 +228,17 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         });
     }
 
+    public void TogglePlayback()
+    {
+        ExecuteCommand("TogglePlayback", () =>
+        {
+            if (_requestedState == PlaybackState.Playing)
+                Pause();
+            else
+                Play();
+        });
+    }
+
     public void Seek(double positionPercent)
     {
         ExecuteCommand("Seek", () =>
@@ -233,15 +247,42 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
                 !_mediaPlayer.IsSeekable || _mediaPlayer.Length <= 0 ||
                 _requestedState is not (PlaybackState.Playing or PlaybackState.Paused)) return;
 
-            ResetTimeline();
-            _resumeTime = null;
             var normalized = Math.Clamp(positionPercent / 100d, 0d, 1d);
-            _seekTarget = (long)(_mediaPlayer.Length * normalized);
-            _seekStarted = Stopwatch.GetTimestamp();
-            Trace.WriteLine($"Playback seek: target={_seekTarget}ms, intent={_requestedState}");
-            // VLC's time seek flushes the demux/decoder buffers and resets its shared A/V clock.
-            // Do not stop/restart playback or toggle pause around this asynchronous operation.
-            _mediaPlayer.Time = _seekTarget;
+            SeekTo((long)(_mediaPlayer.Length * normalized));
+        });
+    }
+
+    public void SeekRelative(TimeSpan offset)
+    {
+        ExecuteCommand("SeekRelative", () =>
+        {
+            if (!IsLoaded || !_mediaPlayer.IsSeekable || _mediaPlayer.Length <= 0 ||
+                _requestedState is not (PlaybackState.Playing or PlaybackState.Paused)) return;
+            var current = _resumeTime ?? (_seekTarget >= 0 ? _seekTarget : Math.Max(0, _mediaPlayer.Time));
+            var target = Math.Clamp((decimal)current + offset.Ticks / TimeSpan.TicksPerMillisecond,
+                0, _mediaPlayer.Length);
+            SeekTo((long)target);
+        });
+    }
+
+    private void SeekTo(long time)
+    {
+        ResetTimeline();
+        _resumeTime = null;
+        _seekTarget = time;
+        _seekStarted = Stopwatch.GetTimestamp();
+        Trace.WriteLine($"Playback seek: target={_seekTarget}ms, intent={_requestedState}");
+        // VLC's time seek flushes the demux/decoder buffers and resets its shared A/V clock.
+        // Do not stop/restart playback or toggle pause around this asynchronous operation.
+        _mediaPlayer.Time = _seekTarget;
+    }
+
+    public void SetMuted(bool muted)
+    {
+        ExecuteCommand("SetMuted", () =>
+        {
+            _muted = muted;
+            _mediaPlayer.Mute = muted;
         });
     }
 

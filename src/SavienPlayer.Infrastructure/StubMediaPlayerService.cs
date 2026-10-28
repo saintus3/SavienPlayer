@@ -14,6 +14,7 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     public PlaybackError? LastError => null;
     public TimeSpan CurrentTime { get; private set; }
     public string? CurrentMediaPath { get; private set; }
+    public bool IsMuted { get; private set; }
     public PlaybackResumePoint? GetResumePoint() =>
         IsLoaded && CurrentMediaPath != null ? new(CurrentMediaPath, CurrentTime) : null;
 
@@ -43,6 +44,22 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
         CurrentTime = TimeSpan.Zero;
         SetState(PlaybackState.Stopped);
     }
+
+    public void TogglePlayback()
+    {
+        if (State == PlaybackState.Playing) Pause();
+        else Play();
+    }
+
+    public void SeekRelative(TimeSpan offset)
+    {
+        if (!IsLoaded || State is not (PlaybackState.Playing or PlaybackState.Paused)) return;
+        var ticks = Math.Clamp((decimal)CurrentTime.Ticks + offset.Ticks, 0, TimeSpan.MaxValue.Ticks);
+        CurrentTime = TimeSpan.FromTicks((long)ticks);
+        TimeChanged?.Invoke(this, CurrentTime);
+    }
+
+    public void SetMuted(bool muted) => IsMuted = muted;
 
     public void Seek(double positionPercent)
     {

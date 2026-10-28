@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private bool _windowedMaximized;
     private bool _closing;
     private readonly DispatcherTimer _subtitleTimer;
+    private readonly PlaybackKeyboardRouter _keyboardRouter;
 
     public MainWindow(IMediaPlayerService playerService, PlayerSettingsStore settingsStore, PlayerSettings settings)
     {
@@ -75,6 +76,7 @@ public partial class MainWindow : Window
         _subtitleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _subtitleTimer.Tick += (_, _) => RefreshSubtitle();
         _subtitleTimer.Start();
+        _keyboardRouter = new PlaybackKeyboardRouter(this, SubtitleDisplay, HandleShortcut);
     }
 
     protected override void OnContentRendered(EventArgs e)
@@ -141,8 +143,15 @@ public partial class MainWindow : Window
     private void VolumeBar_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         _playerService.SetVolume((int)e.NewValue);
-        if (!_restoringSettings) SaveSettings();
+        if (!_restoringSettings)
+        {
+            MuteToggle.IsChecked = false;
+            SaveSettings();
+        }
     }
+
+    private void MuteToggle_OnChanged(object sender, RoutedEventArgs e) =>
+        _playerService.SetMuted(MuteToggle.IsChecked == true);
 
     private void PlaybackRateBar_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -233,15 +242,43 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    private bool HandleShortcut(Key key, ModifierKeys modifiers, bool repeat)
     {
-        base.OnPreviewKeyDown(e);
-        if (e.Handled || Keyboard.Modifiers != ModifierKeys.Control ||
-            Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
-        if (e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets)
+        if (modifiers == ModifierKeys.Control && key is Key.OemOpenBrackets or Key.OemCloseBrackets)
         {
-            SetSubtitleOffset(_subtitleService.OffsetMilliseconds + (e.Key == Key.OemOpenBrackets ? -100 : 100));
-            e.Handled = true;
+            SetSubtitleOffset(_subtitleService.OffsetMilliseconds + (key == Key.OemOpenBrackets ? -100 : 100));
+            return true;
+        }
+        if (modifiers != ModifierKeys.None) return false;
+        switch (key)
+        {
+            case Key.Space:
+                if (!repeat) _playerService.TogglePlayback();
+                return true;
+            case Key.Left:
+            case Key.Right:
+                Interlocked.Increment(ref _positionVersion);
+                _playerService.SeekRelative(TimeSpan.FromSeconds(key == Key.Left ? -5 : 5));
+                RefreshSubtitle();
+                SaveSettings();
+                return true;
+            case Key.Up:
+            case Key.Down:
+                MuteToggle.IsChecked = false;
+                VolumeBar.Value = Math.Clamp(VolumeBar.Value + (key == Key.Up ? 5 : -5), 0, 100);
+                return true;
+            case Key.M:
+                if (!repeat) MuteToggle.IsChecked = MuteToggle.IsChecked != true;
+                return true;
+            case Key.F:
+                if (!repeat)
+                {
+                    SetFullscreen(!_isFullscreen);
+                    SaveSettings();
+                }
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -324,6 +361,7 @@ public partial class MainWindow : Window
         _closing = true;
         _saveTimer.Stop();
         _subtitleTimer.Stop();
+        _keyboardRouter.Dispose();
         _playerService.PositionChanged -= PlayerServiceOnPositionChanged;
         _playerService.PlaybackFailed -= PlayerServiceOnPlaybackFailed;
         VideoView.MediaPlayer = null;

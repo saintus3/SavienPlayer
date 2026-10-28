@@ -37,6 +37,8 @@
                     <TextBlock Text="볼륨" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <Slider x:Name="VolumeBar" Width="120" Minimum="0" Maximum="100" Value="70"
                             ValueChanged="VolumeBar_OnValueChanged"/>
+                    <CheckBox x:Name="MuteToggle" Content="음소거 (M)" VerticalAlignment="Center" Margin="8,0,0,0"
+                              Checked="MuteToggle_OnChanged" Unchecked="MuteToggle_OnChanged"/>
                     <Button Content="전체화면" Width="90" Margin="10,0,0,0" Click="FullscreenButton_OnClick"/>
                 </StackPanel>
             </DockPanel>
