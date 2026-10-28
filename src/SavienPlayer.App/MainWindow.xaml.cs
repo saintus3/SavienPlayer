@@ -15,7 +15,7 @@ public partial class MainWindow : Window
     private readonly IMediaPlayerService _playerService;
     private readonly ISubtitleService _subtitleService;
     private readonly Playlist _playlist = new();
-    private bool _isFullscreen;
+    private WindowDisplayController? _displayController;
     private Point _dragStart;
     private PlaylistItem? _dragItem;
     private long _playbackVersion;
@@ -242,20 +242,20 @@ public partial class MainWindow : Window
 
     private void FullscreenButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _isFullscreen = !_isFullscreen;
+        _displayController?.ToggleFullscreen();
+    }
 
-        if (_isFullscreen)
-        {
-            WindowStyle = WindowStyle.None;
-            WindowState = WindowState.Maximized;
-            ResizeMode = ResizeMode.NoResize;
-        }
-        else
-        {
-            WindowStyle = WindowStyle.SingleBorderWindow;
-            WindowState = WindowState.Normal;
-            ResizeMode = ResizeMode.CanResize;
-        }
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        _displayController = new WindowDisplayController(this);
+    }
+
+    private void Window_OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (PlaybackControls is null || PlaylistColumn is null) return;
+        PlaybackControls.MaxHeight = Math.Max(100, ActualHeight * 0.55);
+        PlaylistColumn.Width = new GridLength(Math.Min(280, Math.Max(0, ActualWidth - 24) * 0.4));
     }
 
     private void OpenSubtitleButton_OnClick(object sender, RoutedEventArgs e)
@@ -369,6 +369,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosing = true;
+        _displayController?.Dispose();
         _positionTimer.Stop();
         _positionTimer.Tick -= PositionTimer_OnTick;
         _playerService.PositionChanged -= PlayerServiceOnPositionChanged;

@@ -20,6 +20,7 @@ Windows C# video player (WPF, .NET 8) inspired by modern desktop players.
 - Subtitle v1: load/clear + sync(ms) apply
 - Playlist: multi-file add, bulk removal, drag-to-reorder, duplicate policy, and automatic next playback (#7)
 - Opt-in performance logs and bounded seek-bar updates (#8)
+- Per-monitor DPI scaling, adaptive controls, and monitor-aware fullscreen restoration (#9)
 
 ## Prerequisites (Important)
 LibVLCSharp uses native VLC runtime. Install one of:
@@ -110,3 +111,29 @@ Validation also exercised concurrent publication, consumption, actual five-secon
 | 1080p / 2 hours; 4K / 2 hours | Pending Windows/VLC/GPU benchmark |
 
 The Linux implementation environment cannot run WPF or validate Windows PDH/GPU playback. Consequently real playback CPU/GPU deltas and compliance with the two-hour memory budget remain unverified; do not substitute the synthetic queue experiment for those results.
+
+## DPI and Multiple Monitors (#9)
+
+The application manifest requests **Per-Monitor V2** DPI awareness, with Per-Monitor fallback. WPF sizes remain in device-independent units; layout rounding and pixel snapping keep control edges aligned at fractional scales. Playback/subtitle controls wrap on narrower windows and scroll vertically when space is limited. Buttons and text inputs have a minimum 32-DIP height; playlist rows and checkboxes have a minimum 28-DIP height. The playlist shares available width with the video rather than forcing a fixed minimum window width.
+
+On startup and DPI/display/work-area changes, a normal window is constrained to its current monitor's usable work area, with minimum sizes reduced when the monitor cannot accommodate them. Fullscreen covers the current monitor, including its taskbar area. Exiting fullscreen restores the previous native window placement, including an originally maximized state and the original frame/resize style. Saved bounds are remapped to the original monitor's current DPI and constrained to its work area; if that monitor has been removed, an available monitor is used instead. Native monitor coordinates are physical pixels and can be negative; they are not assigned directly to WPF `Left`/`Top`. Display and DPI notifications trigger deferred bounds updates after WPF processes the DPI change. If a monitor is disconnected, Windows selects an available monitor and the bounds update keeps the window accessible.
+
+### Windows verification matrix
+
+Use the built executable (so its embedded manifest is applied), installed native VLC, and actual video playback. For each case below, test **125%, 150%, and 200%**, plus a mixed-scale pair such as 100%/200%. Include a secondary display left of or above the primary, and taskbars on different edges.
+
+| Scenario | Expected result |
+| --- | --- |
+| Start at each scale, resize to the smallest usable window | Readable text, no overlapping controls; playback/subtitle actions wrap and remain reachable by scrolling |
+| Click every button, checkbox, slider, text input and playlist row | Visible control and hit area agree; seek, volume, subtitle sync, selection and drag/drop still work |
+| Drag a normal window between mixed-DPI displays | Text and controls rescale without bitmap blur; video and playlist resize without manual scaling |
+| Enter/exit fullscreen on each monitor from a normal window | Fullscreen stays on that monitor, covers the screen, and restores the original position and size |
+| Enter/exit fullscreen from a maximized window | Original maximized state is restored, not replaced with a normal window |
+| Move fullscreen with Win+Shift+Arrow | Window covers the destination display; repeat exiting/re-entering fullscreen |
+| Change resolution, scale, taskbar edge or auto-hide setting while open | Bounds follow the current monitor/work area; controls remain reachable |
+| Disconnect the active monitor while normal and while fullscreen | Window stays reachable on a remaining display; fullscreen can be exited |
+| Repeat fullscreen toggles during playback, pause and subtitle display | No loss of video, incorrect scaling, misplaced click targets, or unexpected playback changes |
+
+Record Windows build, monitor resolutions/scales, taskbar configuration and failures/screenshots for each run. Build and XAML/manifest validation can run on Linux, but the native window transitions, video-host rendering, text sharpness and click alignment require Windows hardware validation. These interactive matrix checks have **not** been executed in the Linux implementation environment.
+
+Implementation validation included Debug/Release cross-builds, embedded manifest/XAML checks, and 11 temporary-console checks of the production placement calculation covering DPI ratios, negative monitor origins, removal, taskbar workspace offsets and work-area clamping. The existing test project has no test runner; no additional test dependencies were introduced.
