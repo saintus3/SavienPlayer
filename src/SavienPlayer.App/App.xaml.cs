@@ -2,6 +2,7 @@ using System.Windows;
 using System.Diagnostics;
 using System.IO;
 using SavienPlayer.Infrastructure;
+using SavienPlayer.Core;
 
 namespace SavienPlayer.App;
 
@@ -31,7 +32,11 @@ public partial class App : Application
         try
         {
             _playerService = new VlcMediaPlayerService();
-            var window = new MainWindow(_playerService);
+            var settingsStore = new PlayerSettingsStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SavienPlayer", "settings.json"));
+            PlayerSettings settings = settingsStore.Load();
+            var window = new MainWindow(_playerService, settingsStore, settings);
             window.Show();
         }
         catch (Exception exception)

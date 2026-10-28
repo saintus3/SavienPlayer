@@ -37,6 +37,15 @@
                 </StackPanel>
             </DockPanel>
 
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <TextBlock Text="재생속도" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Slider x:Name="PlaybackRateBar" Width="140" Minimum="0.25" Maximum="4" Value="1"
+                        TickFrequency="0.25" IsSnapToTickEnabled="True"
+                        ValueChanged="PlaybackRateBar_OnValueChanged"/>
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
+                           Text="{Binding Value, ElementName=PlaybackRateBar, StringFormat={}{0:0.##}×}"/>
+            </StackPanel>
+
             <DockPanel Margin="0,10,0,0" LastChildFill="False">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button Content="자막 열기" Width="90" Margin="0,0,8,0" Click="OpenSubtitleButton_OnClick"/>

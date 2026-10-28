@@ -19,6 +19,10 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     private long _seekTarget = -1;
     private long _seekStarted;
     private string? _mediaPath;
+    private long? _resumeTime;
+    private float _playbackRate = 1;
+    private bool _playbackStarted;
+    private long _resumeWaitStarted;
     private readonly object _diagnosticGate = new();
     private readonly Queue<string> _nativeErrors = new();
 
@@ -30,6 +34,18 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     public bool IsLoaded { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.None;
     public PlaybackError? LastError { get; private set; }
+    public PlaybackResumePoint? GetResumePoint()
+    {
+        lock (_commandGate)
+        {
+            if (_disposed || !IsLoaded || _mediaPath == null) return null;
+            var time = _requestedState is PlaybackState.Stopped or PlaybackState.Ended
+                ? 0 : _resumeTime ?? (_seekTarget >= 0 ? _seekTarget : Math.Max(0, _mediaPlayer.Time));
+            var position = TimeSpan.FromTicks(Math.Clamp(time, 0,
+                TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerMillisecond) * TimeSpan.TicksPerMillisecond);
+            return new PlaybackResumePoint(_mediaPath, position);
+        }
+    }
 
     public MediaPlayer NativePlayer => _mediaPlayer;
 
@@ -69,6 +85,10 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
         _mediaPlayer.Playing += (_, _) => QueueCallback(() =>
         {
+            if (!_playbackStarted) _resumeWaitStarted = Stopwatch.GetTimestamp();
+            _playbackStarted = true;
+            ApplyPlaybackRate();
+            TryRestorePosition();
             if (_requestedState == PlaybackState.Paused)
                 _mediaPlayer.SetPause(true);
             else if (_requestedState == PlaybackState.Playing)
@@ -92,9 +112,11 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         };
         _mediaPlayer.EndReached += (_, _) => QueueCallback(() => Complete(PlaybackState.Ended));
         _mediaPlayer.EncounteredError += (_, _) => QueueCallback(() => FailPlayback("VLC.EncounteredError"));
+        _mediaPlayer.LengthChanged += (_, _) => QueueCallback(TryRestorePosition);
+        _mediaPlayer.SeekableChanged += (_, _) => QueueCallback(TryRestorePosition);
     }
 
-    public void Open(string mediaPath)
+    public void Open(string mediaPath, TimeSpan? startPosition = null)
     {
         ExecuteCommand("Open", () =>
         {
@@ -102,8 +124,11 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             _mediaPath = mediaPath;
             LastError = null;
             _mediaPlayer.Stop();
+            _playbackStarted = false;
             Interlocked.Increment(ref _mediaVersion);
             ResetTimeline();
+            _resumeTime = startPosition.HasValue && startPosition.Value > TimeSpan.Zero
+                ? startPosition.Value.Ticks / TimeSpan.TicksPerMillisecond : null;
             IsLoaded = false;
             lock (_diagnosticGate) _nativeErrors.Clear();
             _mediaPlayer.Media = null;
@@ -161,6 +186,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         {
             if (_disposed || !IsLoaded) return;
             _requestedState = PlaybackState.Stopped;
+            _playbackStarted = false;
+            _resumeTime = null;
             _mediaPlayer.Stop();
             Interlocked.Increment(ref _mediaVersion);
             ResetTimeline();
@@ -179,6 +206,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
                 _requestedState is not (PlaybackState.Playing or PlaybackState.Paused)) return;
 
             ResetTimeline();
+            _resumeTime = null;
             var normalized = Math.Clamp(positionPercent / 100d, 0d, 1d);
             _seekTarget = (long)(_mediaPlayer.Length * normalized);
             _seekStarted = Stopwatch.GetTimestamp();
@@ -196,6 +224,39 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             if (_disposed) return;
             _mediaPlayer.Volume = Math.Clamp(volume, 0, 100);
         });
+    }
+
+    public void SetPlaybackRate(double rate)
+    {
+        ExecuteCommand("SetPlaybackRate", () =>
+        {
+            if (!double.IsFinite(rate) || rate is < 0.25 or > 4) return;
+            _playbackRate = (float)rate;
+            if (IsLoaded && _requestedState is PlaybackState.Playing or PlaybackState.Paused)
+                ApplyPlaybackRate();
+        });
+    }
+
+    private void ApplyPlaybackRate()
+    {
+        if (_mediaPlayer.SetRate(_playbackRate) != 0)
+            Trace.TraceWarning($"VLC rejected playback rate {_playbackRate}; requested preference is retained.");
+    }
+
+    private void TryRestorePosition()
+    {
+        if (!_resumeTime.HasValue || !_playbackStarted || !IsLoaded || !_mediaPlayer.IsSeekable ||
+            _mediaPlayer.Length <= 0 ||
+            _requestedState is not (PlaybackState.Playing or PlaybackState.Paused)) return;
+        var target = _resumeTime.Value;
+        _resumeTime = null;
+        // A completed or shortened file starts over rather than immediately reaching EOF.
+        if (target >= _mediaPlayer.Length - 1000) target = 0;
+        ResetTimeline();
+        _seekTarget = target;
+        _seekStarted = Stopwatch.GetTimestamp();
+        Trace.WriteLine($"Playback resume: target={target}ms");
+        _mediaPlayer.Time = target;
     }
 
     public bool TryLoad(string subtitlePath, out string? errorMessage)
@@ -267,6 +328,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
     private void Complete(PlaybackState state)
     {
+        _resumeTime = null;
+        _playbackStarted = false;
         _requestedState = state;
         ResetTimeline();
         SetState(state);
@@ -324,6 +387,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             $"{Environment.NewLine}Recent engine diagnostics (unattributed):{Environment.NewLine}{diagnostic}");
 
         _requestedState = PlaybackState.Error;
+        _playbackStarted = false;
+        _resumeTime = null;
         IsLoaded = false;
         try
         {
@@ -377,6 +442,14 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
     private void OnTimeChanged(long time)
     {
+        if (_resumeTime.HasValue)
+        {
+            TryRestorePosition();
+            if (!_resumeTime.HasValue) return;
+            if (!_playbackStarted || Stopwatch.GetElapsedTime(_resumeWaitStarted).TotalSeconds < 5) return;
+            Trace.TraceWarning("Resume skipped: media did not become seekable with a known duration within five seconds.");
+            _resumeTime = null;
+        }
         if (_seekTarget >= 0)
         {
             var elapsed = Stopwatch.GetElapsedTime(_seekStarted).TotalMilliseconds;

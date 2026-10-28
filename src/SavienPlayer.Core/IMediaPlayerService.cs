@@ -10,11 +10,13 @@ public interface IMediaPlayerService
     bool IsLoaded { get; }
     PlaybackState State { get; }
     PlaybackError? LastError { get; }
+    PlaybackResumePoint? GetResumePoint();
 
-    void Open(string mediaPath);
+    void Open(string mediaPath, TimeSpan? startPosition = null);
     void Play();
     void Pause();
     void Stop();
     void Seek(double positionPercent);
     void SetVolume(int volume);
+    void SetPlaybackRate(double rate);
 }

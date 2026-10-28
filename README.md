@@ -132,3 +132,66 @@ record per attempt, the matching category/file, and either a managed exception
 or native diagnostic context. Also deny log-folder writes and verify playback
 errors still show without a secondary crash. Re-run the #1 stress scenarios to
 check the nonblocking native-callback/UI boundary.
+
+## Settings and resume playback (#3)
+
+Preferences are stored locally in
+`%LOCALAPPDATA%\SavienPlayer\settings.json` (JSON schema version `1`).
+They include volume (0–100), requested playback speed (0.25–4×), normal window
+size, maximized/fullscreen state, and the last opened file and position in
+milliseconds. The speed slider changes the requested rate; VLC may reject or
+not honor a rate for some media/protocols, which is recorded in the trace.
+Fullscreen exit restores the previous windowed maximized/normal state.
+Window dimensions are fitted to the primary work area on startup; position
+and monitor placement are not persisted.
+
+- Volume/speed changes, seeks, Stop, fullscreen toggles, and file selection
+  trigger a save. Window size and playback position are checkpointed every five
+  seconds and on normal window close, before the player is disposed.
+- Writes use a unique temporary file in the settings folder, flush it, and
+  replace the settings file. Failed reads/writes are logged without preventing
+  playback. An unexpected process termination may lose changes since the last
+  checkpoint; simultaneous app instances use last-writer-wins.
+- Missing, invalid, oversized (over 1 MiB), or unreadable settings fall back to
+  defaults. Known-version numeric values are clamped to supported ranges.
+  Version `1` has no migrations yet; missing properties use defaults.
+  Unknown versions are not loaded **or overwritten** during that session.
+- At startup the last accessible file automatically starts playback. Its saved
+  timestamp is applied once VLC has actually started and reports a seekable
+  stream with a known duration. Stop, another file, or an explicit seek cancels
+  a pending resume. A position within the last second or beyond the new duration
+  starts at zero; a stopped/finished file also restarts at zero.
+  If readiness is still unavailable after five seconds from native playback start,
+  the next time notification cancels resume and tracks actual playback instead.
+- If the saved file was moved/deleted or cannot be found, a Korean notice is
+  shown and the player remains ready for **열기**. Other playback failures use
+  the #2 error/retry flow. Settings contain local media paths and stay on this
+  machine; review them before sharing.
+
+### Settings verification (Windows + VLC)
+
+There is no executable test framework in the existing placeholder test project.
+Use these repeatable manual checks:
+
+1. Change volume and speed (for example 35 and 1.5×), resize the normal window,
+   enable fullscreen, and play/seek into a known file. Close normally and relaunch.
+   Verify all preferences, fullscreen, and the saved playback point are restored.
+   Exit fullscreen and confirm the saved windowed dimensions/state return.
+2. Repeat while paused after seeking, while maximized, and after leaving playback
+   running for more than five seconds. Verify long-file resume uses milliseconds
+   rather than rounded percentage. Stop or finish playback and restart: it should
+   begin at zero, not immediately end.
+3. Close immediately after opening a saved file, before VLC is ready, and
+   relaunch: the pending resume target must not be overwritten with startup zero.
+   During startup resume, Stop/open another file and verify no delayed seek leaks
+   into the new session. Check the `Playback resume: target=...ms` trace.
+4. Rename/delete the last file and relaunch. Dismiss the notice and open a valid
+   file. Restore a permission-denied/damaged file and verify the #2 recovery UI.
+5. Back up `settings.json`, then test invalid JSON, `null`, an oversized file,
+   negative position, invalid dimensions, and out-of-range volume/speed.
+   The app must start safely with defaults or normalized values. Test a future
+   `Version` value and confirm the original file is unchanged after closing.
+6. Deny writes to the settings directory and repeat preference changes/close.
+   Playback should continue and diagnostics should explain the save failure.
+   Restore the backup and permissions afterwards; repeat the #1 seek/pause stress
+   checks with non-default playback speed.

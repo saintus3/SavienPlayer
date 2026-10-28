@@ -12,9 +12,15 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     public bool IsLoaded { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.None;
     public PlaybackError? LastError => null;
+    public TimeSpan CurrentTime { get; private set; }
+    public string? CurrentMediaPath { get; private set; }
+    public PlaybackResumePoint? GetResumePoint() =>
+        IsLoaded && CurrentMediaPath != null ? new(CurrentMediaPath, CurrentTime) : null;
 
-    public void Open(string mediaPath)
+    public void Open(string mediaPath, TimeSpan? startPosition = null)
     {
+        CurrentTime = startPosition ?? TimeSpan.Zero;
+        CurrentMediaPath = mediaPath;
         IsLoaded = true;
         SetState(PlaybackState.Opening);
     }
@@ -34,6 +40,7 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     public void Stop()
     {
         if (!IsLoaded) return;
+        CurrentTime = TimeSpan.Zero;
         SetState(PlaybackState.Stopped);
     }
 
@@ -46,6 +53,8 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     {
         _ = volume;
     }
+
+    public void SetPlaybackRate(double rate) => _ = rate;
 
     private void SetState(PlaybackState state)
     {
