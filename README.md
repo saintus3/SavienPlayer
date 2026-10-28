@@ -264,7 +264,7 @@ The test project still has no executable runner. On Windows/VLC:
 ## Playback keyboard shortcuts (#5)
 
 The same map applies in normal and fullscreen mode, including when a button,
-slider, native VLC video surface, or subtitle foreground window has focus:
+slider, video input surface, or subtitle foreground window has focus:
 
 | Key | Action |
 | --- | --- |
@@ -282,6 +282,11 @@ continues to be saved and restored.
 
 Playback keys use a single UI-thread message filter for the main window and
 `VideoView.Content` foreground window, including native child video HWNDs.
+Clicking the video focuses a transparent WPF input surface in that foreground
+window. This keeps interactive key input on the UI thread rather than VLC's
+separate video thread, where WPF's message filter cannot intercept it. The input
+surface intentionally handles video-area mouse hit testing; native DVD/menu mouse
+interaction is not supported through this surface.
 Native VLC keyboard handling is disabled so a key cannot execute both VLC and
 application actions. This is not a system-wide hotkey hook: inactive app windows,
 file/error dialogs, and unrelated windows are excluded. The filter is removed

@@ -76,7 +76,7 @@ public partial class MainWindow : Window
         _subtitleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _subtitleTimer.Tick += (_, _) => RefreshSubtitle();
         _subtitleTimer.Start();
-        _keyboardRouter = new PlaybackKeyboardRouter(this, SubtitleDisplay, HandleShortcut);
+        _keyboardRouter = new PlaybackKeyboardRouter(this, VideoInputSurface, HandleShortcut);
     }
 
     protected override void OnContentRendered(EventArgs e)
@@ -152,6 +152,12 @@ public partial class MainWindow : Window
 
     private void MuteToggle_OnChanged(object sender, RoutedEventArgs e) =>
         _playerService.SetMuted(MuteToggle.IsChecked == true);
+
+    private void VideoInputSurface_OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        // VLC's child video window can own a different thread; keep interactive focus in WPF.
+        Keyboard.Focus(VideoInputSurface);
+    }
 
     private void PlaybackRateBar_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
