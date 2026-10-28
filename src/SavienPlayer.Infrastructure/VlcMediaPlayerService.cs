@@ -25,7 +25,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
     public VlcMediaPlayerService()
     {
-        Core.Initialize();
+        LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC();
         _mediaPlayer = new MediaPlayer(_libVlc);
 
@@ -99,7 +99,8 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             return false;
         }
 
-        var ok = _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, subtitlePath, true);
+        var subtitleUri = new Uri(Path.GetFullPath(subtitlePath)).AbsoluteUri;
+        var ok = _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, subtitleUri, true);
         if (!ok)
         {
             errorMessage = "자막 로드에 실패했습니다.";

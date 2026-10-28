@@ -33,6 +33,7 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     {
         if (!IsLoaded) return;
         SetState(PlaybackState.Stopped);
+        TimeChanged?.Invoke(this, TimeSpan.Zero);
     }
 
     public void Seek(double positionPercent)

@@ -14,17 +14,17 @@ public partial class MainWindow : Window
 
     public MainWindow(IMediaPlayerService playerService)
     {
-        InitializeComponent();
-
-        _playerService = playerService;
-        _playerService.PositionChanged += PlayerServiceOnPositionChanged;
-
         if (playerService is not VlcMediaPlayerService vlc)
         {
             throw new InvalidOperationException("현재 구현은 VlcMediaPlayerService를 필요로 합니다.");
         }
 
+        _playerService = playerService;
         _subtitleService = vlc;
+
+        InitializeComponent();
+
+        _playerService.PositionChanged += PlayerServiceOnPositionChanged;
         VideoView.MediaPlayer = vlc.NativePlayer;
 
         _playerService.SetVolume((int)VolumeBar.Value);
@@ -57,7 +57,7 @@ public partial class MainWindow : Window
 
     private void VolumeBar_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        _playerService.SetVolume((int)e.NewValue);
+        _playerService?.SetVolume((int)e.NewValue);
     }
 
     private void FullscreenButton_OnClick(object sender, RoutedEventArgs e)
