@@ -33,13 +33,15 @@ Prerequisites:
 
 Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
 
-## Subtitle v1 Usage
+## Subtitle Usage
 1. Open a video file
 2. Click `자막 열기` and select `.srt` (or `.ass/.ssa/.vtt`)
 3. Enter sync offset in milliseconds and click `적용`
    - Positive: subtitle later
    - Negative: subtitle earlier
 4. Click `자막 해제` to clear subtitle state
+5. Same-name `.srt`/`.ass` sidecars are loaded automatically. Use the style controls
+   for instant custom rendering, or **원본 스타일 (VLC)** for native ASS effects.
 
 ## Project Structure
 - `src/SavienPlayer.App` - WPF UI layer
@@ -195,3 +197,64 @@ Use these repeatable manual checks:
    Playback should continue and diagnostics should explain the save failure.
    Restore the backup and permissions afterwards; repeat the #1 seek/pause stress
    checks with non-default playback speed.
+
+## Subtitle enhancements (#4)
+
+- Opening/retrying/resuming `movie.mkv` searches its directory for exactly
+  `movie.srt` or `movie.ass` (case-insensitive basename/extension). SRT wins when
+  both exist; ties use ordinal filename order. No language-suffix guessing or
+  recursive scans. A missing/bad sidecar does not fail video playback.
+- Manual loading supports UTF-8 and BOM-marked Unicode SRT, ASS/SSA, and VTT.
+  Custom rendering uses timed plain-text cues, overlapping cues, multiline text,
+  SRT/VTT tag removal/entity decoding, and ASS `Dialogue` records using the
+  `[Events] Format` columns (Text last). ASS override blocks are stripped and
+  `\N`/`\n` line breaks and `\h` spaces are handled. Bad cues are skipped;
+  unsupported/empty/no-valid-cue files report a load error without replacing the
+  current subtitle. Files over 8 MiB are rejected and regex work is time-limited.
+- **−100 / +100** adjust sync by 100 ms. **Ctrl+[ / Ctrl+]** do the same except
+  when editing a text box. The existing millisecond field + **적용** supports
+  precise values, clamped to ±600,000 ms. Positive values display subtitles later.
+  Changes refresh immediately, including when paused or after seeking.
+- Font family, size (12–96 device-independent pixels), black outline (0–6), and
+  top/center/bottom placement apply immediately without restarting playback.
+  External subtitles use `VideoView.Content`'s foreground overlay, not a sibling
+  WPF element hidden behind the native video HWND. It follows the playback clock
+  on a 50 ms UI timer and does not change A/V synchronization. Placement is relative
+  to the video view, including letterbox space.
+- Custom styling intentionally overrides authored ASS styles, animation, karaoke,
+  drawings, and positioning. Enable **원본 스타일 (VLC)** to retain native ASS
+  rendering/embedded fonts and legacy VLC subtitle effects; custom style controls
+  are disabled in that mode, but sync remains adjustable. Switching native mode
+  reattaches the selected external file; repeated switches may add VLC track
+  entries until the media is reopened. If native loading fails at startup, the
+  player falls back to the custom renderer and updates the checkbox.
+- External custom subtitles disable native subtitle tracks to avoid duplicates.
+  **자막 해제** hides subtitles (including native tracks); the saved sync/style
+  preferences remain intact. Auto-discovery runs again when a file is reopened.
+  Embedded-only subtitles still use VLC and are not restyled by the custom controls.
+- Offset, font, size, outline, placement and original-style preference are additive
+  schema-v1 settings saved with the existing change/periodic/close checkpoints.
+  New files and playback failures no longer erase these preferences. Missing
+  installed fonts fall back to an installed system font.
+
+### Subtitle verification
+
+The test project still has no executable runner. On Windows/VLC:
+
+1. Put `sample.srt` next to `sample.mp4`, open/restart/resume, and verify automatic
+   loading and the displayed filename. Repeat with ASS, uppercase extensions,
+   both formats (SRT wins), neither, and malformed preferred sidecars.
+2. Load an SRT with overlapping/multiline cues and seek forward/back repeatedly.
+   Pause on a cue and test both buttons, exact millisecond input, and shortcuts.
+   Check positive delay against a clap/line boundary; check no shortcut activation
+   while typing in the offset field. Stop/end/failure/clear should hide text.
+3. While paused, change each custom style control and verify immediate rendering.
+   Resize/fullscreen/restore and check that text remains visible above the video,
+   wraps, and stays within the view. Repeat at high DPI and with long lines.
+4. Open a styled/karaoke ASS and switch **원본 스타일 (VLC)** on/off. Verify native
+   effects vs custom text, sync in both modes, no duplicate visible captions,
+   and that a failed manual load leaves the prior subtitle usable.
+5. Close/restart after changing sync/font/size/outline/position/native preference.
+   Verify all restore, then open a second video: preferences should carry over
+   but its sidecar must replace the old cues. Test clear, pause/resume, Stop/Play,
+   errors/retry, and the #1 stress scenarios in both rendering modes.

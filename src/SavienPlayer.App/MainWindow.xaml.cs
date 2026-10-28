@@ -2,6 +2,8 @@ using System.IO;
 using System.Windows;
 using System.ComponentModel;
 using System.Windows.Threading;
+using System.Windows.Input;
+using System.Windows.Media;
 using Microsoft.Win32;
 using SavienPlayer.Core;
 using SavienPlayer.Infrastructure;
@@ -21,6 +23,7 @@ public partial class MainWindow : Window
     private bool _restorePending = true;
     private bool _windowedMaximized;
     private bool _closing;
+    private readonly DispatcherTimer _subtitleTimer;
 
     public MainWindow(IMediaPlayerService playerService, PlayerSettingsStore settingsStore, PlayerSettings settings)
     {
@@ -48,10 +51,30 @@ public partial class MainWindow : Window
         PlaybackRateBar.Value = settings.PlaybackRate;
         _playerService.SetVolume(settings.Volume);
         _playerService.SetPlaybackRate(settings.PlaybackRate);
+        _subtitleService.SetOffset(settings.SubtitleOffsetMilliseconds);
+        SubtitleOffsetBox.Text = settings.SubtitleOffsetMilliseconds.ToString();
+        SubtitleFontBox.ItemsSource = Fonts.SystemFontFamilies.OrderBy(f => f.Source).ToArray();
+        SubtitleFontBox.SelectedItem = SubtitleFontBox.Items.Cast<FontFamily>()
+            .FirstOrDefault(f => f.Source.Equals(settings.SubtitleFontFamily, StringComparison.OrdinalIgnoreCase));
+        if (SubtitleFontBox.SelectedItem == null)
+        {
+            SubtitleFontBox.SelectedItem = Fonts.SystemFontFamilies.First();
+            settings.SubtitleFontFamily = ((FontFamily)SubtitleFontBox.SelectedItem).Source;
+        }
+        SubtitleSizeBar.Value = settings.SubtitleFontSize;
+        SubtitleOutlineBar.Value = settings.SubtitleOutlineWidth;
+        SubtitlePositionBox.SelectedIndex = settings.SubtitlePosition switch { "Top" => 0, "Center" => 1, _ => 2 };
+        SubtitleOriginalStyleBox.IsChecked = settings.SubtitleOriginalStyle;
+        _subtitleService.UseOriginalStyle(settings.SubtitleOriginalStyle);
+        SubtitleFontBox.IsEnabled = SubtitleSizeBar.IsEnabled = SubtitleOutlineBar.IsEnabled =
+            SubtitlePositionBox.IsEnabled = !settings.SubtitleOriginalStyle;
         _restoringSettings = false;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _saveTimer.Tick += (_, _) => SaveSettings();
         _saveTimer.Start();
+        _subtitleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _subtitleTimer.Tick += (_, _) => RefreshSubtitle();
+        _subtitleTimer.Start();
     }
 
     protected override void OnContentRendered(EventArgs e)
@@ -94,7 +117,7 @@ public partial class MainWindow : Window
                 _playerService.Play();
             }
             SubtitleStatusText.Text = "자막: 없음";
-            SubtitleOffsetBox.Text = "0";
+            RefreshSubtitle();
             SaveSettings();
         }
     }
@@ -171,7 +194,7 @@ public partial class MainWindow : Window
 
         if (_subtitleService.TryLoad(dialog.FileName, out var error))
         {
-            SubtitleStatusText.Text = $"자막: {Path.GetFileName(dialog.FileName)}";
+            RefreshSubtitle();
             return;
         }
 
@@ -181,8 +204,7 @@ public partial class MainWindow : Window
     private void ClearSubtitleButton_OnClick(object sender, RoutedEventArgs e)
     {
         _subtitleService.Clear();
-        SubtitleStatusText.Text = "자막: 없음";
-        SubtitleOffsetBox.Text = "0";
+        RefreshSubtitle();
     }
 
     private void ApplySubtitleOffsetButton_OnClick(object sender, RoutedEventArgs e)
@@ -193,10 +215,83 @@ public partial class MainWindow : Window
             return;
         }
 
+        SetSubtitleOffset(offset);
+    }
+
+    private void SubtitleEarlier_OnClick(object sender, RoutedEventArgs e) =>
+        SetSubtitleOffset(_subtitleService.OffsetMilliseconds - 100);
+
+    private void SubtitleLater_OnClick(object sender, RoutedEventArgs e) =>
+        SetSubtitleOffset(_subtitleService.OffsetMilliseconds + 100);
+
+    private void SetSubtitleOffset(int offset)
+    {
         _subtitleService.SetOffset(offset);
+        _settings.SubtitleOffsetMilliseconds = _subtitleService.OffsetMilliseconds;
+        SubtitleOffsetBox.Text = _settings.SubtitleOffsetMilliseconds.ToString();
+        RefreshSubtitle();
+        SaveSettings();
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (e.Handled || Keyboard.Modifiers != ModifierKeys.Control ||
+            Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
+        if (e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets)
+        {
+            SetSubtitleOffset(_subtitleService.OffsetMilliseconds + (e.Key == Key.OemOpenBrackets ? -100 : 100));
+            e.Handled = true;
+        }
+    }
+
+    private void SubtitleStyle_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+        ApplySubtitleStyle();
+
+    private void SubtitleStyle_OnSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
+        ApplySubtitleStyle();
+
+    private void ApplySubtitleStyle()
+    {
+        if (_restoringSettings) return;
+        if (SubtitleFontBox.SelectedItem is FontFamily font) _settings.SubtitleFontFamily = font.Source;
+        _settings.SubtitleFontSize = SubtitleSizeBar.Value;
+        _settings.SubtitleOutlineWidth = SubtitleOutlineBar.Value;
+        _settings.SubtitlePosition = (SubtitlePositionBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string ?? "Bottom";
+        RefreshSubtitle();
+        SaveSettings();
+    }
+
+    private void SubtitleOriginalStyle_OnChanged(object sender, RoutedEventArgs e)
+    {
+        if (_restoringSettings) return;
+        var enabled = SubtitleOriginalStyleBox.IsChecked == true;
+        if (!_subtitleService.UseOriginalStyle(enabled))
+        {
+            SubtitleOriginalStyleBox.IsChecked = false;
+            MessageBox.Show(this, "VLC에서 원본 자막을 불러오지 못했습니다. 사용자 스타일로 표시합니다.",
+                "SavienPlayer", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _settings.SubtitleOriginalStyle = enabled;
+        SubtitleFontBox.IsEnabled = SubtitleSizeBar.IsEnabled = SubtitleOutlineBar.IsEnabled =
+            SubtitlePositionBox.IsEnabled = !enabled;
+        RefreshSubtitle();
+        SaveSettings();
+    }
+
+    private void RefreshSubtitle()
+    {
+        if (SubtitleOriginalStyleBox.IsChecked != _subtitleService.UsesOriginalStyle)
+            SubtitleOriginalStyleBox.IsChecked = _subtitleService.UsesOriginalStyle;
+        var point = _playerService.GetResumePoint();
+        var text = point != null && _playerService.State is not (PlaybackState.Stopped or PlaybackState.Ended)
+            ? _subtitleService.GetText(point.Position) : "";
+        SubtitleDisplay.Update(text, _settings.SubtitleFontFamily, _settings.SubtitleFontSize,
+            _settings.SubtitleOutlineWidth, _settings.SubtitlePosition);
         SubtitleStatusText.Text = _subtitleService.IsLoaded
-            ? $"자막: 적용됨 (싱크 {offset}ms)"
-            : $"자막: 없음 (기본 싱크 {offset}ms 저장)";
+            ? $"자막: {Path.GetFileName(_subtitleService.CurrentSubtitlePath)} (싱크 {_subtitleService.OffsetMilliseconds}ms)"
+            : $"자막: 없음 (싱크 {_subtitleService.OffsetMilliseconds}ms)";
     }
 
     private void PlayerServiceOnPositionChanged(object? sender, double position)
@@ -217,7 +312,7 @@ public partial class MainWindow : Window
             Interlocked.Increment(ref _positionVersion);
             SeekBar.Value = 0;
             SubtitleStatusText.Text = "자막: 없음";
-            SubtitleOffsetBox.Text = "0";
+            RefreshSubtitle();
             MessageBox.Show(this, error.Message +
                 "\n\n문제를 해결한 후 '재생'을 누르면 다시 시도합니다. '열기'로 다른 파일을 선택할 수도 있습니다." +
                 App.LogLocationMessage, "SavienPlayer - 재생 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -228,6 +323,7 @@ public partial class MainWindow : Window
     {
         _closing = true;
         _saveTimer.Stop();
+        _subtitleTimer.Stop();
         _playerService.PositionChanged -= PlayerServiceOnPositionChanged;
         _playerService.PlaybackFailed -= PlayerServiceOnPlaybackFailed;
         VideoView.MediaPlayer = null;

@@ -25,6 +25,10 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     private long _resumeWaitStarted;
     private readonly object _diagnosticGate = new();
     private readonly Queue<string> _nativeErrors = new();
+    private SubtitleDocument? _subtitleDocument;
+    private bool _subtitlesDisabled;
+    private bool _originalSubtitleStyle;
+    private string? _nativeSubtitlePath;
 
     public event EventHandler<double>? PositionChanged;
     public event EventHandler<TimeSpan>? TimeChanged;
@@ -52,6 +56,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
     public bool IsSubtitleLoaded { get; private set; }
     public string? CurrentSubtitlePath { get; private set; }
     public int OffsetMilliseconds { get; private set; }
+    public bool UsesOriginalStyle => _originalSubtitleStyle;
     bool ISubtitleService.IsLoaded => IsSubtitleLoaded;
 
     public VlcMediaPlayerService()
@@ -87,6 +92,16 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         {
             if (!_playbackStarted) _resumeWaitStarted = Stopwatch.GetTimestamp();
             _playbackStarted = true;
+            if (_originalSubtitleStyle && IsSubtitleLoaded)
+            {
+                if (!ApplyOriginalSubtitle())
+                {
+                    _originalSubtitleStyle = false;
+                    _mediaPlayer.SetSpu(-1);
+                }
+            }
+            else if (IsSubtitleLoaded || _subtitlesDisabled)
+                _mediaPlayer.SetSpu(-1);
             ApplyPlaybackRate();
             TryRestorePosition();
             if (_requestedState == PlaybackState.Paused)
@@ -150,7 +165,19 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
             IsSubtitleLoaded = false;
             CurrentSubtitlePath = null;
-            OffsetMilliseconds = 0;
+            _subtitleDocument = null;
+            _nativeSubtitlePath = null;
+            _subtitlesDisabled = false;
+            try
+            {
+                var sidecar = SubtitleDocument.FindSidecar(_mediaPath);
+                if (sidecar != null && !TryLoad(sidecar, out var error))
+                    Trace.TraceWarning($"Automatic subtitle load failed: {error}");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Trace.TraceWarning($"Automatic subtitle discovery failed: {exception}");
+            }
         });
     }
 
@@ -186,6 +213,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         {
             if (_disposed || !IsLoaded) return;
             _requestedState = PlaybackState.Stopped;
+            _nativeSubtitlePath = null;
             _playbackStarted = false;
             _resumeTime = null;
             _mediaPlayer.Stop();
@@ -271,28 +299,33 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
                 return false;
             }
 
-            if (!File.Exists(subtitlePath))
+            try
             {
-                errorMessage = "자막 파일을 찾을 수 없습니다.";
+                var document = SubtitleDocument.Load(subtitlePath);
+                if (_originalSubtitleStyle && _playbackStarted)
+                {
+                    if (!_mediaPlayer.AddSlave(MediaSlaveType.Subtitle, subtitlePath, true))
+                    {
+                        errorMessage = "VLC에서 원본 자막을 불러오지 못했습니다.";
+                        return false;
+                    }
+                    _nativeSubtitlePath = subtitlePath;
+                    _mediaPlayer.SetSpuDelay(OffsetMilliseconds * 1000L);
+                }
+                else _mediaPlayer.SetSpu(-1);
+                _subtitleDocument = document;
+                IsSubtitleLoaded = true;
+                CurrentSubtitlePath = subtitlePath;
+                _subtitlesDisabled = false;
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or
+                System.Security.SecurityException or System.Text.RegularExpressions.RegexMatchTimeoutException)
+            {
+                Trace.TraceWarning($"Subtitle load failed: {exception}");
+                errorMessage = "자막을 읽을 수 없습니다. UTF-8/유니코드 SRT·ASS·SSA·VTT 형식과 파일 접근 권한을 확인해주세요.";
                 return false;
             }
-
-            var ok = _mediaPlayer.AddSlave(MediaSlaveType.Subtitle, subtitlePath, true);
-            if (!ok)
-            {
-                errorMessage = "자막 로드에 실패했습니다.";
-                return false;
-            }
-
-            IsSubtitleLoaded = true;
-            CurrentSubtitlePath = subtitlePath;
-
-            if (OffsetMilliseconds != 0)
-            {
-                _mediaPlayer.SetSpuDelay(OffsetMilliseconds * 1000L);
-            }
-
-            return true;
         }
     }
 
@@ -303,7 +336,10 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
             if (_disposed) return;
             IsSubtitleLoaded = false;
             CurrentSubtitlePath = null;
-            OffsetMilliseconds = 0;
+            _subtitleDocument = null;
+            _subtitlesDisabled = true;
+            _nativeSubtitlePath = null;
+            _mediaPlayer.SetSpu(-1);
             _mediaPlayer.SetSpuDelay(0);
         }
     }
@@ -313,9 +349,48 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         lock (_commandGate)
         {
             if (_disposed) return;
-            OffsetMilliseconds = milliseconds;
-            _mediaPlayer.SetSpuDelay(milliseconds * 1000L);
+            OffsetMilliseconds = Math.Clamp(milliseconds, -600000, 600000);
+            if (_originalSubtitleStyle) _mediaPlayer.SetSpuDelay(OffsetMilliseconds * 1000L);
         }
+    }
+
+    public string GetText(TimeSpan position)
+    {
+        lock (_commandGate)
+            return _originalSubtitleStyle ? "" : _subtitleDocument?.GetText(position, OffsetMilliseconds) ?? "";
+    }
+
+    public bool UseOriginalStyle(bool enabled)
+    {
+        lock (_commandGate)
+        {
+            if (_disposed) return false;
+            if (enabled && IsSubtitleLoaded && _playbackStarted && !ApplyOriginalSubtitle()) return false;
+            _originalSubtitleStyle = enabled;
+            if (!enabled)
+            {
+                _nativeSubtitlePath = null;
+                _mediaPlayer.SetSpu(-1);
+                _mediaPlayer.SetSpuDelay(0);
+            }
+            return true;
+        }
+    }
+
+    private bool ApplyOriginalSubtitle()
+    {
+        if (CurrentSubtitlePath == null) return true;
+        if (_nativeSubtitlePath != CurrentSubtitlePath)
+        {
+            if (!_mediaPlayer.AddSlave(MediaSlaveType.Subtitle, CurrentSubtitlePath, true))
+            {
+                Trace.TraceWarning("VLC original subtitle load failed.");
+                return false;
+            }
+            _nativeSubtitlePath = CurrentSubtitlePath;
+        }
+        _mediaPlayer.SetSpuDelay(OffsetMilliseconds * 1000L);
+        return true;
     }
 
     private void SetState(PlaybackState state)
@@ -328,6 +403,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
 
     private void Complete(PlaybackState state)
     {
+        _nativeSubtitlePath = null;
         _resumeTime = null;
         _playbackStarted = false;
         _requestedState = state;
@@ -405,7 +481,7 @@ public sealed class VlcMediaPlayerService : IMediaPlayerService, ISubtitleServic
         ResetTimeline();
         IsSubtitleLoaded = false;
         CurrentSubtitlePath = null;
-        OffsetMilliseconds = 0;
+        _subtitleDocument = null;
         SetState(PlaybackState.Error);
         TimeChanged?.Invoke(this, TimeSpan.Zero);
         PositionChanged?.Invoke(this, 0);
