@@ -21,6 +21,7 @@ Windows C# video player (WPF, .NET 8) inspired by modern desktop players.
 - Playlist: multi-file add, bulk removal, drag-to-reorder, duplicate policy, and automatic next playback (#7)
 - Opt-in performance logs and bounded seek-bar updates (#8)
 - Per-monitor DPI scaling, adaptive controls, and monitor-aware fullscreen restoration (#9)
+- Interface-injected ViewModel, separate playback/settings/subtitle services, and core unit tests (#10)
 
 ## Prerequisites (Important)
 LibVLCSharp uses native VLC runtime. Install one of:
@@ -45,10 +46,10 @@ Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
 4. Click `자막 해제` to clear subtitle state
 
 ## Project Structure
-- `src/SavienPlayer.App` - WPF UI layer
-- `src/SavienPlayer.Core` - domain models and interfaces
-- `src/SavienPlayer.Infrastructure` - VLC-based media player service
-- `tests/SavienPlayer.Tests` - test project placeholder
+- `src/SavienPlayer.App` - WPF views, UI adapters, native window handling, and application composition
+- `src/SavienPlayer.Core` - platform-independent ViewModel, commands, domain models, and service interfaces
+- `src/SavienPlayer.Infrastructure` - VLC playback/subtitles, JSON settings, and performance logging
+- `tests/SavienPlayer.Tests` - core scenario and persistence unit tests, runnable without WPF or native VLC
 
 ## Playlist Usage
 - `열기` adds multiple selected files and plays the first; `파일 추가` appends without interrupting playback.
@@ -56,10 +57,22 @@ Open `SavienPlayer.sln`, set `SavienPlayer.App` as startup project, run.
 - Ctrl/Shift-select items and use `선택 삭제` for bulk removal. Drag an item onto another row to move it to that row's position, or into the empty area to move it to the end.
 - Duplicates are blocked by default using case-insensitive absolute file paths. `중복 추가 허용` allows separate entries for the same file. Turning it off blocks future duplicates but does not remove existing entries.
 - Natural completion and `다음` follow the current list order without wrapping. Moving the current item does not interrupt playback. Removing it plays the next surviving item after it if playback was active; otherwise the successor is loaded without playing. If there is no successor, playback stops.
-- Order and duplicate policy are saved after edits in `%LOCALAPPDATA%\SavienPlayer\playlist.json` and restored on startup without autoplay.
+- Order, duplicate policy, and volume are saved after edits in `%LOCALAPPDATA%\SavienPlayer\playlist.json` and restored on startup without autoplay. Existing playlist files remain compatible; a missing volume defaults to 70.
 
 ## Build Validation
-Run `dotnet build SavienPlayer.sln` on Windows. Cross-compilation on other platforms uses `dotnet build SavienPlayer.sln -p:EnableWindowsTargeting=true`; running the WPF UI still requires Windows and native VLC. The test project is currently a placeholder with no test runner.
+Run `dotnet build SavienPlayer.sln` on Windows. Cross-compilation on other platforms uses `dotnet build SavienPlayer.sln -p:EnableWindowsTargeting=true`; running the WPF UI still requires Windows and native VLC.
+
+Run the unit tests with `dotnet test tests/SavienPlayer.Tests/SavienPlayer.Tests.csproj`. They use fake dependencies and temporary settings directories, so they do not require Windows, native VLC, or access to the user's settings.
+
+## Architecture and Test Boundaries (#10)
+
+- **Core `PlayerViewModel`** owns observable playback/settings state and commands, playlist navigation and editing, subtitle status/sync validation, and performance logging opt-in. It depends only on `IMediaPlayerService`, `ISubtitleService`, `ISettingsService`, `IUiDispatcher`, `IUserNotifications`, and `IPerformanceLogService`; it has no WPF or LibVLC dependency.
+- **Infrastructure services** implement native playback (`VlcMediaPlayerService`), native subtitle operations/state (`VlcSubtitleService`), JSON persistence (`JsonSettingsService`), and performance-session creation (`PerformanceLogService`). Subtitle state no longer lives in the playback service. JSON writes replace a temporary file; persisted files keep the existing `Files` and `AllowDuplicates` fields and add `Volume`.
+- **App composition** in `App.OnStartup` creates and constructor-injects the services and ViewModel explicitly, without a service locator or DI-container dependency. `MainWindow` receives the ViewModel and a native player only for `VideoView` rendering; it no longer casts a playback interface to the VLC service.
+- **View-only code** handles file dialogs, multi-selection/drag gestures, scrolling, the 100-ms position-drain timer, and native DPI/fullscreen layout. Playback actions use XAML commands; volume, duplicate policy, subtitle input/status and performance state use bindings.
+- **Threading and ownership** remain explicit: native events post work through the dispatcher abstraction, queued work is checked against playback/session versions, and positions use a bounded latest-value mailbox. Closing the window stops view timers, unsubscribes/disposes the ViewModel and its logging session, and detaches rendering before the application disposes the native player.
+
+The xUnit tests replace native playback, subtitles, settings, UI dispatch, notifications and logging with controlled fakes. Core scenarios cover settings restoration/defaults/failures, property notifications and commands, duplicate handling, reorder/delete playback intent, delayed or stale completion/position events, subtitle validation/reset, and performance error/disposal behavior. Persistence tests exercise the real JSON service in isolated temporary directories, including legacy files and malformed input. They do not substitute for Windows video-rendering, DPI/multi-monitor or long-running GPU benchmarks described below.
 
 ## Performance Measurement (#8)
 
@@ -103,7 +116,7 @@ A Linux x64 Release-mode .NET 8-targeted console experiment (SDK/runtime 10.0.40
 
 This is a deterministic backlog/allocation comparison, **not a WPF throughput or CPU/GPU playback benchmark**. To repeat, run the two publication loops in a Release console referencing Core, with no consumption until the burst ends; warm up first, create the mailbox before the measured interval, and measure only current-thread allocations. Queue growth and runtime versions affect the old byte total. The candidate must retain only the last complete version/position pair and must not allocate per publication.
 
-Validation also exercised concurrent publication, consumption, actual five-second process sampling, JSONL metadata, missing GPU data, retention, cancellation, and sampling-error reporting. The repository test project remains a placeholder; these checks used a temporary console without adding dependencies.
+Validation for #8 also exercised concurrent publication, consumption, actual five-second process sampling, JSONL metadata, missing GPU data, retention, cancellation, and sampling-error reporting. Those checks used a temporary console before the unit test infrastructure was introduced in #10.
 
 | Actual playback comparison | Status |
 | --- | --- |
@@ -136,4 +149,4 @@ Use the built executable (so its embedded manifest is applied), installed native
 
 Record Windows build, monitor resolutions/scales, taskbar configuration and failures/screenshots for each run. Build and XAML/manifest validation can run on Linux, but the native window transitions, video-host rendering, text sharpness and click alignment require Windows hardware validation. These interactive matrix checks have **not** been executed in the Linux implementation environment.
 
-Implementation validation included Debug/Release cross-builds, embedded manifest/XAML checks, and 11 temporary-console checks of the production placement calculation covering DPI ratios, negative monitor origins, removal, taskbar workspace offsets and work-area clamping. The existing test project has no test runner; no additional test dependencies were introduced.
+Implementation validation for #9 included Debug/Release cross-builds, embedded manifest/XAML checks, and 11 temporary-console checks of the production placement calculation covering DPI ratios, negative monitor origins, removal, taskbar workspace offsets and work-area clamping. No additional test dependencies were introduced for #9; unit test infrastructure was subsequently added in #10.

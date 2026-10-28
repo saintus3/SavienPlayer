@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
+using SavienPlayer.Core;
 
 namespace SavienPlayer.Infrastructure;
 
-public sealed class PerformanceLogSession : IDisposable
+public sealed class PerformanceLogSession : IPerformanceLogSession
 {
     private const long MaximumBytes = 16 * 1024 * 1024;
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
