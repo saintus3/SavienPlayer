@@ -1,127 +1,133 @@
-using System.IO;
 using System.Windows;
+using System.ComponentModel;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
+using LibVLCSharp.Shared;
 using Microsoft.Win32;
 using SavienPlayer.Core;
-using SavienPlayer.Infrastructure;
 
 namespace SavienPlayer.App;
 
 public partial class MainWindow : Window
 {
-    private readonly IMediaPlayerService _playerService;
-    private readonly ISubtitleService _subtitleService;
-    private bool _isFullscreen;
+    private readonly PlayerViewModel _viewModel;
+    private readonly DispatcherTimer _positionTimer;
+    private WindowDisplayController? _displayController;
+    private Point _dragStart;
+    private PlaylistItem? _dragItem;
 
-    public MainWindow(IMediaPlayerService playerService)
+    public MainWindow(PlayerViewModel viewModel, MediaPlayer nativePlayer)
     {
-        if (playerService is not VlcMediaPlayerService vlc)
-        {
-            throw new InvalidOperationException("현재 구현은 VlcMediaPlayerService를 필요로 합니다.");
-        }
-
-        _playerService = playerService;
-        _subtitleService = vlc;
-
+        _viewModel = viewModel;
         InitializeComponent();
-
-        _playerService.PositionChanged += PlayerServiceOnPositionChanged;
-        VideoView.MediaPlayer = vlc.NativePlayer;
-
-        _playerService.SetVolume((int)VolumeBar.Value);
+        DataContext = viewModel;
+        _viewModel.PropertyChanged += ViewModel_OnPropertyChanged;
+        VideoView.MediaPlayer = nativePlayer;
+        _positionTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _positionTimer.Tick += PositionTimer_OnTick;
+        _positionTimer.Start();
     }
 
-    private void OpenButton_OnClick(object sender, RoutedEventArgs e)
+    private void PositionTimer_OnTick(object? sender, EventArgs e) => _viewModel.DrainPosition();
+    private void ViewModel_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PlayerViewModel.CurrentItem) && _viewModel.CurrentItem is { } item)
+            PlaylistList.ScrollIntoView(item);
+    }
+    private void OpenButton_OnClick(object sender, RoutedEventArgs e) => AddFiles(true);
+    private void AddFilesButton_OnClick(object sender, RoutedEventArgs e) => AddFiles(false);
+
+    private void AddFiles(bool play)
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "Video Files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.ts;*.m4v|All Files|*.*"
+            Filter = "Video Files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.ts;*.m4v|All Files|*.*",
+            Multiselect = true
         };
-
-        if (dialog.ShowDialog() == true)
-        {
-            _playerService.Open(dialog.FileName);
-            _playerService.Play();
-            SubtitleStatusText.Text = "자막: 없음";
-            SubtitleOffsetBox.Text = "0";
-        }
+        if (dialog.ShowDialog() == true) _viewModel.AddFiles(dialog.FileNames, play);
     }
 
-    private void PlayButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Play();
-    private void PauseButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Pause();
-    private void StopButton_OnClick(object sender, RoutedEventArgs e) => _playerService.Stop();
+    private void RemoveFilesButton_OnClick(object sender, RoutedEventArgs e) =>
+        _viewModel.Remove(PlaylistList.SelectedItems.Cast<PlaylistItem>().ToArray());
 
-    private void SeekBar_OnPreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void PlaylistList_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        _playerService.Seek(SeekBar.Value);
+        if (e.OriginalSource is DependencyObject source &&
+            ItemsControl.ContainerFromElement(PlaylistList, source) is ListBoxItem { DataContext: PlaylistItem item })
+            _viewModel.Open(item);
     }
 
-    private void VolumeBar_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void PlaylistList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _playerService?.SetVolume((int)e.NewValue);
+        _dragStart = e.GetPosition(PlaylistList);
+        _dragItem = e.OriginalSource is DependencyObject source &&
+            ItemsControl.ContainerFromElement(PlaylistList, source) is ListBoxItem container
+            ? container.DataContext as PlaylistItem : null;
     }
 
-    private void FullscreenButton_OnClick(object sender, RoutedEventArgs e)
+    private void PlaylistList_OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        _isFullscreen = !_isFullscreen;
+        if (e.LeftButton != MouseButtonState.Pressed || _dragItem is null) return;
+        var position = e.GetPosition(PlaylistList);
+        if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var item = _dragItem;
+        _dragItem = null;
+        DragDrop.DoDragDrop(PlaylistList, new DataObject(typeof(PlaylistItem), item), DragDropEffects.Move);
+    }
 
-        if (_isFullscreen)
-        {
-            WindowStyle = WindowStyle.None;
-            WindowState = WindowState.Maximized;
-            ResizeMode = ResizeMode.NoResize;
-        }
-        else
-        {
-            WindowStyle = WindowStyle.SingleBorderWindow;
-            WindowState = WindowState.Normal;
-            ResizeMode = ResizeMode.CanResize;
-        }
+    private void PlaylistList_OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetData(typeof(PlaylistItem)) is PlaylistItem item && _viewModel.Playlist.Items.Contains(item)
+            ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void PlaylistList_OnDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(PlaylistItem)) is not PlaylistItem item || !_viewModel.Playlist.Items.Contains(item)) return;
+        var target = e.OriginalSource is DependencyObject source
+            ? ItemsControl.ContainerFromElement(PlaylistList, source) as ListBoxItem : null;
+        var index = target?.DataContext is PlaylistItem targetItem
+            ? _viewModel.Playlist.Items.IndexOf(targetItem) : _viewModel.Playlist.Items.Count - 1;
+        _viewModel.Move(item, index);
+        e.Handled = true;
+    }
+
+    private void SeekBar_OnPreviewMouseUp(object sender, MouseButtonEventArgs e) => _viewModel.Seek(SeekBar.Value);
+    private void FullscreenButton_OnClick(object sender, RoutedEventArgs e) => _displayController?.ToggleFullscreen();
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        _displayController = new WindowDisplayController(this);
+    }
+
+    private void Window_OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (PlaybackControls is null || PlaylistColumn is null) return;
+        PlaybackControls.MaxHeight = Math.Max(100, ActualHeight * 0.55);
+        PlaylistColumn.Width = new GridLength(Math.Min(280, Math.Max(0, ActualWidth - 24) * 0.4));
     }
 
     private void OpenSubtitleButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
-        {
-            Filter = "Subtitle Files|*.srt;*.ass;*.ssa;*.vtt|All Files|*.*"
-        };
-
-        if (dialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        if (_subtitleService.TryLoad(dialog.FileName, out var error))
-        {
-            SubtitleStatusText.Text = $"자막: {Path.GetFileName(dialog.FileName)}";
-            return;
-        }
-
-        MessageBox.Show(error ?? "자막 로드에 실패했습니다.", "SavienPlayer", MessageBoxButton.OK, MessageBoxImage.Warning);
+        var dialog = new OpenFileDialog { Filter = "Subtitle Files|*.srt;*.ass;*.ssa;*.vtt|All Files|*.*" };
+        if (dialog.ShowDialog() == true) _viewModel.LoadSubtitle(dialog.FileName);
     }
 
-    private void ClearSubtitleButton_OnClick(object sender, RoutedEventArgs e)
+    protected override void OnClosed(EventArgs e)
     {
-        _subtitleService.Clear();
-        SubtitleStatusText.Text = "자막: 없음";
-        SubtitleOffsetBox.Text = "0";
-    }
-
-    private void ApplySubtitleOffsetButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (!int.TryParse(SubtitleOffsetBox.Text, out var offset))
-        {
-            MessageBox.Show("자막 싱크 값은 정수(ms)로 입력해주세요.", "SavienPlayer", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        _subtitleService.SetOffset(offset);
-        SubtitleStatusText.Text = _subtitleService.IsLoaded
-            ? $"자막: 적용됨 (싱크 {offset}ms)"
-            : $"자막: 없음 (기본 싱크 {offset}ms 저장)";
-    }
-
-    private void PlayerServiceOnPositionChanged(object? sender, double position)
-    {
-        Dispatcher.Invoke(() => SeekBar.Value = position);
+        _displayController?.Dispose();
+        _positionTimer.Stop();
+        _positionTimer.Tick -= PositionTimer_OnTick;
+        _viewModel.PropertyChanged -= ViewModel_OnPropertyChanged;
+        _viewModel.Dispose();
+        VideoView.MediaPlayer = null;
+        base.OnClosed(e);
     }
 }
