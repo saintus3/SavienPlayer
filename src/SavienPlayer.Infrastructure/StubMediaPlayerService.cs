@@ -17,6 +17,22 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
         SetState(PlaybackState.Opening);
     }
 
+    public Task OpenUrlAsync(string url, CancellationToken cancellationToken = default)
+    {
+        _ = url;
+        _ = cancellationToken;
+        IsLoaded = true;
+        SetState(PlaybackState.Opening);
+        return Task.CompletedTask;
+    }
+
+    public Task<TimeSpan?> GetMediaDurationAsync(string mediaPath, CancellationToken cancellationToken = default)
+    {
+        _ = mediaPath;
+        _ = cancellationToken;
+        return Task.FromResult<TimeSpan?>(TimeSpan.Zero);
+    }
+
     public void Play()
     {
         if (!IsLoaded) return;
@@ -39,6 +55,11 @@ public sealed class StubMediaPlayerService : IMediaPlayerService
     public void Seek(double positionPercent)
     {
         PositionChanged?.Invoke(this, positionPercent);
+    }
+
+    public void SeekRelative(TimeSpan offset)
+    {
+        _ = offset;
     }
 
     public void SetVolume(int volume)

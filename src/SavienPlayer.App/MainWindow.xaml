@@ -3,14 +3,25 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         mc:Ignorable="d"
         Title="SavienPlayer" Height="680" Width="1100" MinWidth="900" MinHeight="560"
+        WindowStyle="None"
         Background="#111111" Foreground="White"
         PreviewKeyDown="Window_OnPreviewKeyDown">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome x:Name="MainWindowChrome"
+                            CaptionHeight="0"
+                            ResizeBorderThickness="6"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"/>
+    </shell:WindowChrome.WindowChrome>
+
     <Window.Resources>
         <ContextMenu x:Key="VideoContextMenu">
             <MenuItem Header="열기..." Click="OpenButton_OnClick"/>
+            <MenuItem Header="유튜브/URL 열기..." InputGestureText="Ctrl+U" Click="OpenUrlButton_OnClick"/>
             <Separator/>
             <MenuItem Header="재생" Click="PlayButton_OnClick"/>
             <MenuItem Header="일시정지" Click="PauseButton_OnClick"/>
@@ -19,65 +30,221 @@
             <MenuItem Header="자막 열기..." Click="OpenSubtitleButton_OnClick"/>
             <MenuItem Header="자막 해제" Click="ClearSubtitleButton_OnClick"/>
             <Separator/>
+            <MenuItem Header="플레이리스트" Click="PlaylistButton_OnClick"/>
             <MenuItem Header="전체화면 전환" InputGestureText="Enter" Click="FullscreenButton_OnClick"/>
         </ContextMenu>
+
+        <Style x:Key="CompactSliderRepeatButtonStyle" TargetType="RepeatButton">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="{TemplateBinding Background}" Height="4" CornerRadius="2"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CompactSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Height" Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse Fill="#EAEAEA" Stroke="#3A3A3A" StrokeThickness="1"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CompactSliderStyle" TargetType="Slider">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Height" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center" Height="12" Background="Transparent">
+                            <Border Height="4" Background="#333333" CornerRadius="2" VerticalAlignment="Center"/>
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource CompactSliderRepeatButtonStyle}"
+                                                  Background="#3A86FF"
+                                                  Command="Slider.DecreaseLarge"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource CompactSliderRepeatButtonStyle}"
+                                                  Background="Transparent"
+                                                  Command="Slider.IncreaseLarge"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource CompactSliderThumbStyle}"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IconControlButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="20"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="#252525"/>
+            <Setter Property="BorderBrush" Value="#3A3A3A"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#383838"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1C1C1C"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Grid x:Name="RootGrid" Margin="12">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="VideoBorder" Grid.Row="0" CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1"
-                ContextMenu="{StaticResource VideoContextMenu}">
-            <vlc:VideoView x:Name="VideoView">
-                <Grid Background="Transparent"
+        <Border x:Name="CustomTitleBar"
+                Grid.Row="0"
+                Height="16"
+                Background="#1A1A1A"
+                BorderBrush="#2A2A2A"
+                BorderThickness="0,0,0,1"
+                MouseLeftButtonDown="CustomTitleBar_OnMouseLeftButtonDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           FontSize="10"
+                           Foreground="#CCCCCC"
+                           VerticalAlignment="Center"
+                           Margin="8,0,0,0"
+                           IsHitTestVisible="False"/>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Width="28" Height="16"
+                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Padding="0" ToolTip="최소화"
+                            Click="MinimizeWindowButton_OnClick">
+                        <Path Data="M 0,0 H 8" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Button>
+                    <Button Width="28" Height="16"
+                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Padding="0" ToolTip="최대화/복원"
+                            Click="MaximizeRestoreWindowButton_OnClick">
+                        <Path Data="M 0,0 H 7 V 7 H 0 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Button>
+                    <Button Width="28" Height="16"
+                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Padding="0" ToolTip="닫기"
+                            Click="CloseWindowButton_OnClick">
+                        <Path Data="M 0,0 L 7,7 M 7,0 L 0,7" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid x:Name="RootGrid" Grid.Row="1" Margin="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+        <Border x:Name="VideoBorder" Grid.Row="0" CornerRadius="8" Background="DarkBlue" BorderBrush="#2A2A2A" BorderThickness="1" ClipToBounds="True"
+                ContextMenu="{StaticResource VideoContextMenu}"
+                PreviewMouseLeftButtonDown="VideoSurface_OnPreviewMouseLeftButtonDown"
+                PreviewMouseRightButtonUp="VideoSurface_OnPreviewMouseRightButtonUp">
+            <vlc:VideoView x:Name="VideoView"
+                           Background="DarkGray"
+                           ContextMenu="{StaticResource VideoContextMenu}">
+                <Grid x:Name="VideoOverlayGrid"
                       Focusable="True"
                       Loaded="VideoOverlay_OnLoaded"
                       PreviewKeyDown="Window_OnPreviewKeyDown"
+                      PreviewMouseLeftButtonDown="VideoSurface_OnPreviewMouseLeftButtonDown"
+                      PreviewMouseRightButtonUp="VideoSurface_OnPreviewMouseRightButtonUp"
                       ContextMenu="{StaticResource VideoContextMenu}"/>
             </vlc:VideoView>
         </Border>
 
-        <StackPanel x:Name="ControlsPanel" Grid.Row="1" Margin="0,10,0,0">
-            <Slider x:Name="SeekBar" Minimum="0" Maximum="100" Value="0" Height="24"
+        <StackPanel x:Name="ControlsPanel" Grid.Row="1" Margin="0,8,0,0">
+            <Slider x:Name="SeekBar" Style="{StaticResource CompactSliderStyle}" Minimum="0" Maximum="100" Value="0" Height="12"
                     PreviewMouseUp="SeekBar_OnPreviewMouseUp"/>
 
-            <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Content="열기" Width="70" Margin="0,0,8,0" Click="OpenButton_OnClick"/>
-                    <Button Content="재생" Width="70" Margin="0,0,8,0" Click="PlayButton_OnClick"/>
-                    <Button Content="일시정지" Width="80" Margin="0,0,8,0" Click="PauseButton_OnClick"/>
-                    <Button Content="정지" Width="70" Click="StopButton_OnClick"/>
+            <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="열기" AutomationProperties.Name="열기" Click="OpenButton_OnClick">
+                        <Path Data="M 0,2 H 5 L 6.5,3.5 H 12 V 10 H 0 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="유튜브/URL 열기" AutomationProperties.Name="유튜브/URL 열기" Click="OpenUrlButton_OnClick">
+                        <Path Data="M 1,2 H 11 A 1,1 0 0 1 12,3 V 9 A 1,1 0 0 1 11,10 H 1 A 1,1 0 0 1 0,9 V 3 A 1,1 0 0 1 1,2 Z M 4.5,4 L 8.5,6 L 4.5,8 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="재생" AutomationProperties.Name="재생" Click="PlayButton_OnClick">
+                        <Path Data="M 0,0 L 0,12 L 10,6 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="일시정지" AutomationProperties.Name="일시정지" Click="PauseButton_OnClick">
+                        <Path Data="M 0,0 H 3.5 V 12 H 0 Z M 6.5,0 H 10 V 12 H 6.5 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="정지" AutomationProperties.Name="정지" Click="StopButton_OnClick">
+                        <Path Data="M 0,0 H 12 V 12 H 0 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Stretch="Uniform" Width="11" Height="11"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="자막 열기" AutomationProperties.Name="자막 열기" Click="OpenSubtitleButton_OnClick">
+                        <Path Data="M 0,1 H 12 V 10 H 0 Z M 2,4 H 6 M 7,4 H 10 M 2,7 H 10" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" Margin="0,0,6,0" ToolTip="자막 해제" AutomationProperties.Name="자막 해제" Click="ClearSubtitleButton_OnClick">
+                        <Path Data="M 0,1 H 12 V 10 H 0 Z M 0,0 L 12,11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
+                    <Button Style="{StaticResource IconControlButtonStyle}" ToolTip="플레이리스트" AutomationProperties.Name="플레이리스트" Click="PlaylistButton_OnClick">
+                        <Path Data="M 0,2 H 2 M 4,2 H 12 M 0,6 H 2 M 4,6 H 12 M 0,10 H 2 M 4,10 H 12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Stretch="Uniform" Width="12" Height="12"/>
+                    </Button>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <TextBlock Text="볼륨" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <Slider x:Name="VolumeBar" Width="120" Minimum="0" Maximum="100" Value="70"
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Path Data="M 0,4 H 3 L 7,1 V 11 L 3,8 H 0 Z M 9,3.5 A 3.5,3.5 0 0 1 9,8.5 M 10.5,1.5 A 6,6 0 0 1 10.5,10.5"
+                          Fill="White"
+                          Stroke="White"
+                          StrokeThickness="1"
+                          Stretch="Uniform"
+                          Width="14"
+                          Height="14"
+                          VerticalAlignment="Center"
+                          Margin="0,0,8,0"
+                          ToolTip="볼륨"/>
+                    <Slider x:Name="VolumeBar" Style="{StaticResource CompactSliderStyle}" Width="120" Height="12" Minimum="0" Maximum="100" Value="70" VerticalAlignment="Center"
                             ValueChanged="VolumeBar_OnValueChanged"/>
-                    <Button Content="전체화면" Width="90" Margin="10,0,0,0" Click="FullscreenButton_OnClick"/>
                 </StackPanel>
             </DockPanel>
-
-            <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Content="자막 열기" Width="90" Margin="0,0,8,0" Click="OpenSubtitleButton_OnClick"/>
-                    <Button Content="자막 해제" Width="90" Margin="0,0,8,0" Click="ClearSubtitleButton_OnClick"/>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <TextBlock Text="자막 싱크(ms)" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox x:Name="SubtitleOffsetBox" Width="90" Text="0" Margin="0,0,8,0"/>
-                    <Button Content="적용" Width="60" Click="ApplySubtitleOffsetButton_OnClick"/>
-                </StackPanel>
-            </DockPanel>
-
-            <TextBlock x:Name="SubtitleStatusText"
-                       Margin="0,8,0,0"
-                       FontSize="12"
-                       Opacity="0.85"
-                       Text="자막: 없음"/>
         </StackPanel>
+        </Grid>
     </Grid>
 </Window>
