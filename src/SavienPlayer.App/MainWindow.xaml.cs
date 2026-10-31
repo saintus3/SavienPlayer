@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
 using SavienPlayer.Core;
 using SavienPlayer.Infrastructure;
@@ -11,6 +13,7 @@ public partial class MainWindow : Window
     private readonly IMediaPlayerService _playerService;
     private readonly ISubtitleService _subtitleService;
     private bool _isFullscreen;
+    private WindowState _previousWindowState = WindowState.Normal;
 
     public MainWindow(IMediaPlayerService playerService)
     {
@@ -60,21 +63,61 @@ public partial class MainWindow : Window
         _playerService?.SetVolume((int)e.NewValue);
     }
 
-    private void FullscreenButton_OnClick(object sender, RoutedEventArgs e)
+    private void VideoOverlay_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DependencyObject element)
+        {
+            var overlayWindow = GetWindow(element);
+            if (overlayWindow is not null && !ReferenceEquals(overlayWindow, this))
+            {
+                overlayWindow.PreviewKeyDown -= Window_OnPreviewKeyDown;
+                overlayWindow.PreviewKeyDown += Window_OnPreviewKeyDown;
+            }
+        }
+    }
+
+    private void Window_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && !e.IsRepeat && e.OriginalSource is not TextBox)
+        {
+            e.Handled = true;
+            ToggleFullscreen();
+        }
+    }
+
+    private void FullscreenButton_OnClick(object sender, RoutedEventArgs e) => ToggleFullscreen();
+
+    private void ToggleFullscreen()
     {
         _isFullscreen = !_isFullscreen;
 
         if (_isFullscreen)
         {
+            _previousWindowState = WindowState;
+            ControlsPanel.Visibility = Visibility.Collapsed;
+            RootGrid.Margin = new Thickness(0);
+            VideoBorder.CornerRadius = new CornerRadius(0);
+            VideoBorder.BorderThickness = new Thickness(0);
+
+            if (WindowState == WindowState.Maximized)
+            {
+                WindowState = WindowState.Normal;
+            }
+
             WindowStyle = WindowStyle.None;
-            WindowState = WindowState.Maximized;
             ResizeMode = ResizeMode.NoResize;
+            WindowState = WindowState.Maximized;
         }
         else
         {
+            ControlsPanel.Visibility = Visibility.Visible;
+            RootGrid.Margin = new Thickness(12);
+            VideoBorder.CornerRadius = new CornerRadius(8);
+            VideoBorder.BorderThickness = new Thickness(1);
+
             WindowStyle = WindowStyle.SingleBorderWindow;
-            WindowState = WindowState.Normal;
             ResizeMode = ResizeMode.CanResize;
+            WindowState = _previousWindowState;
         }
     }
 

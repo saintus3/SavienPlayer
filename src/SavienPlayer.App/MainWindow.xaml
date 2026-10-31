@@ -6,18 +6,41 @@
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         mc:Ignorable="d"
         Title="SavienPlayer" Height="680" Width="1100" MinWidth="900" MinHeight="560"
-        Background="#111111" Foreground="White">
-    <Grid Margin="12">
+        Background="#111111" Foreground="White"
+        PreviewKeyDown="Window_OnPreviewKeyDown">
+    <Window.Resources>
+        <ContextMenu x:Key="VideoContextMenu">
+            <MenuItem Header="열기..." Click="OpenButton_OnClick"/>
+            <Separator/>
+            <MenuItem Header="재생" Click="PlayButton_OnClick"/>
+            <MenuItem Header="일시정지" Click="PauseButton_OnClick"/>
+            <MenuItem Header="정지" Click="StopButton_OnClick"/>
+            <Separator/>
+            <MenuItem Header="자막 열기..." Click="OpenSubtitleButton_OnClick"/>
+            <MenuItem Header="자막 해제" Click="ClearSubtitleButton_OnClick"/>
+            <Separator/>
+            <MenuItem Header="전체화면 전환" InputGestureText="Enter" Click="FullscreenButton_OnClick"/>
+        </ContextMenu>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid" Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1">
-            <vlc:VideoView x:Name="VideoView"/>
+        <Border x:Name="VideoBorder" Grid.Row="0" CornerRadius="8" Background="#1B1B1B" BorderBrush="#2A2A2A" BorderThickness="1"
+                ContextMenu="{StaticResource VideoContextMenu}">
+            <vlc:VideoView x:Name="VideoView">
+                <Grid Background="Transparent"
+                      Focusable="True"
+                      Loaded="VideoOverlay_OnLoaded"
+                      PreviewKeyDown="Window_OnPreviewKeyDown"
+                      ContextMenu="{StaticResource VideoContextMenu}"/>
+            </vlc:VideoView>
         </Border>
 
-        <StackPanel Grid.Row="1" Margin="0,10,0,0">
+        <StackPanel x:Name="ControlsPanel" Grid.Row="1" Margin="0,10,0,0">
             <Slider x:Name="SeekBar" Minimum="0" Maximum="100" Value="0" Height="24"
                     PreviewMouseUp="SeekBar_OnPreviewMouseUp"/>
 
