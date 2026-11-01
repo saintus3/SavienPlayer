@@ -430,6 +430,7 @@ public partial class MainWindow : Window
     private void UpdateVideoSurfaceAppearance(PlaybackState state)
     {
         var isVideoActive = _playerService.IsLoaded && state is PlaybackState.Opening or PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused;
+        PlaceholderGrid.Visibility = isVideoActive ? Visibility.Collapsed : Visibility.Visible;
         VideoBorder.Background = isVideoActive ? Brushes.Black : Brushes.LightGray;
         VideoOverlayGrid.Background = isVideoActive ? HitTestTransparentBrush : Brushes.LightGray;
     }
