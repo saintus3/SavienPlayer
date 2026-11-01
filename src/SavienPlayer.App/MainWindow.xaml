@@ -8,7 +8,7 @@
         mc:Ignorable="d"
         Title="SavienPlayer" Height="680" Width="1100" MinWidth="900" MinHeight="560"
         WindowStyle="None"
-        Background="#111111" Foreground="White"
+        Background="#0B1622" Foreground="#D6EAF8"
         PreviewKeyDown="Window_OnPreviewKeyDown">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome x:Name="MainWindowChrome"
@@ -54,7 +54,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
-                        <Ellipse Fill="#EAEAEA" Stroke="#3A3A3A" StrokeThickness="1"/>
+                        <Ellipse Fill="#D6EAF8" Stroke="#1E3A52" StrokeThickness="1"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -69,11 +69,11 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
                         <Grid VerticalAlignment="Center" Height="12" Background="Transparent">
-                            <Border Height="4" Background="#333333" CornerRadius="2" VerticalAlignment="Center"/>
+                            <Border Height="4" Background="#17324A" CornerRadius="2" VerticalAlignment="Center"/>
                             <Track x:Name="PART_Track">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Style="{StaticResource CompactSliderRepeatButtonStyle}"
-                                                  Background="#3A86FF"
+                                                  Background="#2EC4D6"
                                                   Command="Slider.DecreaseLarge"/>
                                 </Track.DecreaseRepeatButton>
                                 <Track.IncreaseRepeatButton>
@@ -95,8 +95,8 @@
             <Setter Property="Width" Value="20"/>
             <Setter Property="Height" Value="20"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Background" Value="#252525"/>
-            <Setter Property="BorderBrush" Value="#3A3A3A"/>
+            <Setter Property="Background" Value="#123047"/>
+            <Setter Property="BorderBrush" Value="#1E3A52"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -113,10 +113,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#383838"/>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1C4A6B"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1C1C1C"/>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#0A1F30"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -146,26 +146,26 @@
 
                 <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
                            FontSize="10"
-                           Foreground="#CCCCCC"
+                           Foreground="#9CC4E4"
                            VerticalAlignment="Center"
                            Margin="8,0,0,0"
                            IsHitTestVisible="False"/>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <Button Width="28" Height="16"
-                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Background="Transparent" BorderThickness="0" Foreground="#9CC4E4"
                             Padding="0" ToolTip="최소화"
                             Click="MinimizeWindowButton_OnClick">
                         <Path Data="M 0,0 H 8" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                     </Button>
                     <Button Width="28" Height="16"
-                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Background="Transparent" BorderThickness="0" Foreground="#9CC4E4"
                             Padding="0" ToolTip="최대화/복원"
                             Click="MaximizeRestoreWindowButton_OnClick">
                         <Path Data="M 0,0 H 7 V 7 H 0 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                     </Button>
                     <Button Width="28" Height="16"
-                            Background="Transparent" BorderThickness="0" Foreground="#CCCCCC"
+                            Background="Transparent" BorderThickness="0" Foreground="#9CC4E4"
                             Padding="0" ToolTip="닫기"
                             Click="CloseWindowButton_OnClick">
                         <Path Data="M 0,0 L 7,7 M 7,0 L 0,7" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Stretch="None" VerticalAlignment="Center" HorizontalAlignment="Center"/>
@@ -180,10 +180,17 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-        <Border x:Name="VideoBorder" Grid.Row="0" CornerRadius="8" Background="DarkBlue" BorderBrush="#2A2A2A" BorderThickness="1" ClipToBounds="True"
+        <Border x:Name="VideoBorder" Grid.Row="0" CornerRadius="4" Background="#06121D" BorderThickness="2" ClipToBounds="True"
                 ContextMenu="{StaticResource VideoContextMenu}"
                 PreviewMouseLeftButtonDown="VideoSurface_OnPreviewMouseLeftButtonDown"
                 PreviewMouseRightButtonUp="VideoSurface_OnPreviewMouseRightButtonUp">
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#5FA8D3" Offset="0"/>
+                    <GradientStop Color="#1E3A52" Offset="0.5"/>
+                    <GradientStop Color="#030A12" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.BorderBrush>
             <vlc:VideoView x:Name="VideoView"
                            Background="DarkGray"
                            ContextMenu="{StaticResource VideoContextMenu}">
@@ -201,7 +208,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Viewbox Grid.Column="1" Stretch="Uniform">
-                            <TextBlock Text="Hello, Savien!" Foreground="#333333" FontWeight="Bold"/>
+                            <TextBlock Text="Hello, Savien!" Foreground="#1E3A52" FontWeight="Bold"/>
                         </Viewbox>
                     </Grid>
                 </Grid>
@@ -259,3 +266,4 @@
         </Grid>
     </Grid>
 </Window>
+

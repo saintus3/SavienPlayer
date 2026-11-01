@@ -100,7 +100,7 @@ public partial class MainWindow : Window
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
             WindowStyle = WindowStyle.ToolWindow,
-            Background = new SolidColorBrush(Color.FromRgb(0x1B, 0x1B, 0x1B)),
+            Background = new SolidColorBrush(Color.FromRgb(0x0B, 0x16, 0x22)),
             Foreground = Brushes.White
         };
 
@@ -120,10 +120,10 @@ public partial class MainWindow : Window
             Text = initialUrl,
             Height = 26,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A)),
+            Background = new SolidColorBrush(Color.FromRgb(0x12, 0x30, 0x47)),
             Foreground = Brushes.White,
             CaretBrush = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3A)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x3A, 0x52)),
             Padding = new Thickness(6, 0, 6, 0)
         };
         Grid.SetRow(urlBox, 1);
@@ -352,8 +352,8 @@ public partial class MainWindow : Window
             CustomTitleBar.Visibility = Visibility.Visible;
             ControlsPanel.Visibility = Visibility.Visible;
             RootGrid.Margin = new Thickness(12);
-            VideoBorder.CornerRadius = new CornerRadius(8);
-            VideoBorder.BorderThickness = new Thickness(1);
+            VideoBorder.CornerRadius = new CornerRadius(4);
+            VideoBorder.BorderThickness = new Thickness(2);
             MainWindowChrome.ResizeBorderThickness = new Thickness(6);
 
             ResizeMode = ResizeMode.CanResize;
@@ -435,3 +435,4 @@ public partial class MainWindow : Window
         VideoOverlayGrid.Background = isVideoActive ? HitTestTransparentBrush : Brushes.LightGray;
     }
 }
+
