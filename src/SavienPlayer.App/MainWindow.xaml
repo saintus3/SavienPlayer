@@ -193,7 +193,18 @@
                       PreviewKeyDown="Window_OnPreviewKeyDown"
                       PreviewMouseLeftButtonDown="VideoSurface_OnPreviewMouseLeftButtonDown"
                       PreviewMouseRightButtonUp="VideoSurface_OnPreviewMouseRightButtonUp"
-                      ContextMenu="{StaticResource VideoContextMenu}"/>
+                      ContextMenu="{StaticResource VideoContextMenu}">
+                    <Grid x:Name="PlaceholderGrid" IsHitTestVisible="False">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Viewbox Grid.Column="1" Stretch="Uniform">
+                            <TextBlock Text="Hello, Savien!" Foreground="#333333" FontWeight="Bold"/>
+                        </Viewbox>
+                    </Grid>
+                </Grid>
             </vlc:VideoView>
         </Border>
 
