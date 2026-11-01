@@ -174,7 +174,7 @@
             </Grid>
         </Border>
 
-        <Grid x:Name="RootGrid" Grid.Row="1" Margin="12">
+        <Grid x:Name="RootGrid" Grid.Row="1" Margin="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>

@@ -351,7 +351,7 @@ public partial class MainWindow : Window
         {
             CustomTitleBar.Visibility = Visibility.Visible;
             ControlsPanel.Visibility = Visibility.Visible;
-            RootGrid.Margin = new Thickness(12);
+            RootGrid.Margin = new Thickness(2);
             VideoBorder.CornerRadius = new CornerRadius(4);
             VideoBorder.BorderThickness = new Thickness(2);
             MainWindowChrome.ResizeBorderThickness = new Thickness(6);
